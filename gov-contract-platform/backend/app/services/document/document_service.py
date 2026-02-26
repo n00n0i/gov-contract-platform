@@ -1,5 +1,8 @@
 """
 Document Service - Business Logic
+
+This service now uses centralized OCR Settings for all document processing.
+All OCR operations use settings from Settings > OCR (OCRSettingsService).
 """
 import io
 import uuid
@@ -14,7 +17,8 @@ from app.schemas.document import (
     DocumentCreate, DocumentUpdate, OCRResult, DocumentStatus, FileType
 )
 from app.services.storage.minio_service import get_storage_service
-from app.services.document.ocr_service import get_ocr_service
+from app.services.document.ocr_service import get_ocr_service, OCRService
+from app.services.document.ocr_settings_service import get_ocr_settings_service, OCRSettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +232,8 @@ class DocumentService:
     def process_ocr(self, document_id: str) -> OCRResult:
         """
         Process OCR for document (called by Celery task)
+        
+        Uses centralized OCR Settings from Settings > OCR.
         """
         document = self.db.query(ContractAttachment).filter(
             ContractAttachment.id == document_id
@@ -244,8 +250,30 @@ class DocumentService:
             # Download file
             file_data = self.storage.download_file(document.storage_path)
             
-            # Process OCR
-            ocr_service = get_ocr_service()
+            # Get centralized OCR settings
+            ocr_settings_service = get_ocr_settings_service(
+                db=self.db, 
+                user_id=self.user_id
+            )
+            
+            # Validate settings before processing
+            validation = ocr_settings_service.validate_settings()
+            if not validation["valid"]:
+                error_msg = f"OCR settings validation failed: {'; '.join(validation['errors'])}"
+                logger.error(f"[OCR] {error_msg}")
+                document.ocr_status = "failed"
+                document.ocr_error = error_msg
+                self.db.commit()
+                return OCRResult(success=False, error_message=error_msg)
+            
+            # Log OCR mode being used
+            mode = ocr_settings_service.get_mode()
+            engine = ocr_settings_service.get_engine()
+            language = ocr_settings_service.get_language()
+            logger.info(f"[OCR] Processing document {document_id} with mode={mode}, engine={engine}, lang={language}")
+            
+            # Process OCR with centralized settings
+            ocr_service = OCRService(ocr_settings_service=ocr_settings_service)
             result = ocr_service.process_document(file_data, document.mime_type)
             
             if result.success:

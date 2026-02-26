@@ -1,5 +1,8 @@
 """
 Document API Routes
+
+All document uploads are automatically processed with OCR using centralized settings
+from Settings > OCR (OCRSettingsService).
 """
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
@@ -14,6 +17,7 @@ from app.schemas.document import (
     DocumentStatus, UploadProgress
 )
 from app.services.document.document_service import DocumentService
+from app.services.document.ocr_settings_service import get_ocr_settings_service
 from app.services.agent.trigger_service import on_document_upload
 from app.core.security import get_current_user_id, get_current_user_payload
 from app.core.logging import get_logger
@@ -41,14 +45,19 @@ async def upload_document(
     description: Optional[str] = Form(None),
     contract_id: Optional[str] = Form(None),
     vendor_id: Optional[str] = Form(None),
-    doc_service: DocumentService = Depends(get_doc_service)
+    doc_service: DocumentService = Depends(get_doc_service),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
 ):
     """
     Upload a document file
     
     Supported formats: PDF, JPG, PNG, TIFF, DOC, DOCX
     
-    After upload, the document will be queued for OCR processing automatically.
+    After upload, the document will be queued for OCR processing automatically
+    using the centralized OCR Settings (Settings > OCR).
+    
+    The OCR mode (Tesseract/Typhoon/Custom) is determined by the user's OCR settings.
     """
     # Validate file type
     allowed_types = [
@@ -215,15 +224,47 @@ def reprocess_ocr(
     doc_service: DocumentService = Depends(get_doc_service)
 ):
     """
-    Re-trigger OCR processing for document
+    Re-trigger OCR processing for document using centralized OCR Settings
+    
+    The document will be re-processed with the current OCR settings from Settings > OCR.
     """
     from app.tasks.document import process_document_ocr
     
     process_document_ocr.delay(document_id, doc_service.tenant_id)
     
     return {
-        "message": "OCR processing queued",
+        "message": "OCR processing queued with centralized settings",
         "document_id": document_id
+    }
+
+
+@router.get("/settings/ocr-status")
+def get_document_ocr_settings(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Get current OCR settings status for document processing
+    
+    Returns the OCR configuration that will be used when processing uploaded documents.
+    """
+    ocr_settings_service = get_ocr_settings_service(db, user_id)
+    settings = ocr_settings_service.get_settings()
+    validation = ocr_settings_service.validate_settings()
+    
+    return {
+        "success": True,
+        "data": {
+            "mode": settings.get("mode", "default"),
+            "engine": settings.get("engine", "tesseract"),
+            "language": settings.get("language", "tha+eng"),
+            "dpi": settings.get("dpi", 300),
+            "auto_rotate": settings.get("auto_rotate", True),
+            "deskew": settings.get("deskew", True),
+            "is_typhoon_configured": ocr_settings_service.is_typhoon_configured(),
+            "is_custom_api_configured": ocr_settings_service.is_custom_api_configured(),
+            "validation": validation
+        }
     }
 
 
