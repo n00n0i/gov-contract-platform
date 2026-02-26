@@ -1,426 +1,552 @@
-# Gov Contract Platform - Feature Walkthrough
+# 📘 Gov Contract Platform - คู่มือการใช้งานฉบับสมบูรณ์
 
-## ภาพรวมระบบ (Overview)
-
-**Gov Contract Platform** คือระบบบริหารจัดการสัญญาภาครัฐแบบครบวงจร รองรับการทำงานร่วมกับ AI และระบบอัตโนมัติ เพื่อเพิ่มประสิทธิภาพในการจัดการสัญญา เอกสาร และผู้มีส่วนได้ส่วนเสีย
-
----
-
-## 📋 สารบัญ
-
-1. [Authentication & Security](#1-authentication--security)
-2. [Dashboard & Analytics](#2-dashboard--analytics)
-3. [Contract Management](#3-contract-management)
-4. [Vendor Management](#4-vendor-management)
-5. [Template Management](#5-template-management)
-6. [AI & Automation](#6-ai--automation)
-7. [Knowledge Base & RAG](#7-knowledge-base--rag)
-8. [Notification System](#8-notification-system)
-9. [Organization & Access Control](#9-organization--access-control)
-10. [System Settings](#10-system-settings)
+> **สำหรับ**: ผู้ดูแลระบบ, เจ้าหน้าที่จัดการสัญญา, และผู้ใช้งานทั่วไป  
+> **เวอร์ชัน**: 2.0 | **อัปเดต**: กุมภาพันธ์ 2026
 
 ---
 
-## 1. Authentication & Security
+## 📑 สารบัญ
 
-### 1.1 Login System
-- **Username/Password**: ระบบล็อกอินด้วยชื่อผู้ใช้และรหัสผ่าน
-- **JWT Token**: ใช้ JSON Web Token สำหรับการยืนยันตัวตน
-- **Session Management**: จัดการเซสชันผู้ใช้อัตโนมัติ
-
-### 1.2 Two-Factor Authentication (2FA)
-- **TOTP Support**: รองรับ Time-based One-Time Password
-- **QR Code Setup**: สแกน QR Code เพื่อตั้งค่า Authenticator App
-- **Backup Codes**: รหัสสำรองสำหรับกรณีฉุกเฉิน
-- **Enable/Disable**: เปิด/ปิด 2FA ได้ตามต้องการ
-
-**การใช้งาน**:
-1. ไปที่ Settings > ความปลอดภัย
-2. สแกน QR Code ด้วย Google Authenticator หรือแอปที่รองรับ
-3. กรอกรหัส 6 หลักเพื่อยืนยัน
+1. [เริ่มต้นใช้งาน](#-เริ่มต้นใช้งาน)
+2. [การล็อกอินและความปลอดภัย](#-การล็อกอินและความปลอดภัย)
+3. [หน้า Dashboard](#-หน้า-dashboard)
+4. [การจัดการผู้รับจ้าง (Vendors)](#-การจัดการผู้รับจ้าง-vendors)
+5. [การจัดการสัญญา](#-การจัดการสัญญา)
+6. [Template สัญญาและ AI](#-template-สัญญาและ-ai)
+7. [ระบบ AI และ Automation](#-ระบบ-ai-และ-automation)
+8. [Knowledge Base และ RAG](#-knowledge-base-และ-rag)
+9. [การแจ้งเตือน](#-การแจ้งเตือน)
+10. [การตั้งค่าระบบ](#-การตั้งค่าระบบ)
+11. [แก้ไขปัญหา](#-แก้ไขปัญหา)
 
 ---
 
-## 2. Dashboard & Analytics
+## 🚀 เริ่มต้นใช้งาน
 
-### 2.1 Dashboard Overview
-- **สถิติสรุป**: แสดงจำนวนสัญญา ผู้รับจ้าง เอกสาร แบบ real-time
-- **กราฟแนวโน้ม**: แสดงมูลค่าสัญญารายเดือน
-- **สัญญาใกล้หมดอายุ**: แจ้งเตือนสัญญาที่จะหมดอายุใน 30 วัน
-- **สัญญารอดำเนินการ**: แสดงรายการที่รออนุมัติหรือรอลงนาม
+### ขั้นตอนแรก: เข้าสู่ระบบ
 
-### 2.2 Quick Actions
-- สร้างสัญญาใหม่
-- อัปโหลดเอกสาร
-- เพิ่มผู้รับจ้าง
-- ดูรายงาน
-
----
-
-## 3. Contract Management
-
-### 3.1 Contract CRUD
-- **Create**: สร้างสัญญาใหม่พร้อมกรอกรายละเอียดครบถ้วน
-- **Read**: ดูรายละเอียดสัญญาแบบครบวงจร
-- **Update**: แก้ไขข้อมูลสัญญา
-- **Delete**: ลบสัญญา (Soft Delete)
-
-### 3.2 Contract Details
-- **ข้อมูลพื้นฐาน**: ชื่อสัญญา เลขที่สัญญา วันที่
-- **ผู้เกี่ยวข้อง**: ผู้ว่าจ้าง ผู้รับจ้าง
-- **มูลค่า**: งบประมาณ งวดการจ่ายเงิน
-- **เงื่อนไข**: ระยะเวลา การขยายสัญญา การรับประกัน
-- **เอกสารแนบ**: อัปโหลดและจัดการเอกสารที่เกี่ยวข้อง
-
-### 3.3 Contract Lifecycle
-- **Draft** → **Pending Approval** → **Active** → **Completed** → **Archived**
-- แต่ละสถานะมีการแจ้งเตือนอัตโนมัติ
-
----
-
-## 4. Vendor Management
-
-### 4.1 Vendor Registry (ทะเบียนผู้รับจ้าง)
-
-#### ข้อมูลผู้รับจ้าง
-- **ข้อมูลพื้นฐาน**: ชื่อ (TH/EN), เลขผู้เสียภาษี, ประเภท
-- **ข้อมูลติดต่อ**: ที่อยู่ โทรศัพท์ อีเมล เว็บไซต์
-- **ข้อมูลธนาคาร**: บัญชีสำหรับโอนเงิน
-- **ผู้ติดต่อ**: ชื่อ ตำแหน่ง เบอร์ติดต่อ
-
-#### ประเภทผู้รับจ้าง
-- **นิติบุคคล** (Company)
-- **บุคคลธรรมดา** (Individual)
-- **ห้างหุ้นส่วน** (Partnership)
-- **สหกรณ์** (Cooperative)
-- **รัฐวิสาหกิจ** (State Enterprise)
-- **อื่นๆ** (Other)
-
-### 4.2 Vendor Status System
-
-| สถานะ | ความหมาย | การใช้งาน |
-|-------|----------|------------|
-| **พร้อมใช้งาน** (Active) | สามารถทำสัญญาได้ | ใช้งานปกติ |
-| **ไม่ใช้งาน** (Inactive) | เลิกกิจการ/ไม่ต่อสัญญา | หยุดใช้ชั่วคราว |
-| **รอตรวจสอบเอกสาร** (Pending) | สร้างใหม่ รอตรวจสอบ | ตรวจสอบความถูกต้อง |
-| **ระงับชั่วคราว** (Suspended) | สอบสวน/ปรับปรุง | ตรวจสอนปัญหา |
-| **แบล็คลิสต์** (Blacklisted) | ห้ามทำสัญญา | ทำผิดกฎหมาย/ผิดสัญญาร้ายแรง |
-
-### 4.3 Email Verification
-- **Verify Status**: แสดงสถานะการยืนยันอีเมล
-- **Manual Verify**: Admin สามารถยืนยันอีเมลให้ผู้รับจ้างได้
-- **Visual Indicator**: ⚠️ แสดงเมื่อยังไม่ยืนยัน
-
-### 4.4 System Flag
-- **System Vendors**: ข้อมูลตัวอย่างที่ลบไม่ได้
-- **Visual Badge**: แสดง Badge "ข้อมูลตัวอย่าง"
-- **Delete Protection**: ป้องกันการลบข้อมูลระบบ
-
-### 4.5 Bulk Actions
-เมื่อเลือกหลายรายการ:
-- **เปิดใช้งาน** (Activate)
-- **ปิดใช้งาน** (Deactivate)
-- **ลบ** (Delete) - ข้าม System Vendors อัตโนมัติ
-
-### 4.6 Blacklist Management
-- **Blacklist**: เพิ่มเข้า Blacklist พร้อมระบุเหตุผล
-- **Visual Indicator**: แสดงสถานะและเหตุผลในหน้ารายการ
-- **Prevent Contract**: ห้ามทำสัญญากับผู้รับจ้างใน Blacklist
-
----
-
-## 5. Template Management
-
-### 5.1 Contract Templates
-- **System Templates**: Template มาตรฐานของระบบ (ลบไม่ได้)
-- **User Templates**: Template ที่ผู้ใช้สร้างเอง
-- **Default Template**: ตั้งค่า Template เริ่มต้นแต่ละประเภท
-
-### 5.2 Template Types
-รองรับ 25+ ประเภทสัญญา:
-- จัดซื้อ (Procurement)
-- ก่อสร้าง (Construction)
-- บริการ (Service)
-- ที่ปรึกษา (Consultant)
-- เช่า (Rental)
-- และอื่นๆ
-
-### 5.3 AI-Powered Template Import ⭐
-
-#### Upload & Extract
-- **รองรับไฟล์**: PDF, DOCX, JPG, PNG, TIFF
-- **OCR Integration**: ถอดความจากไฟล์สแกน
-- **AI Extraction**: ใช้ AI วิเคราะห์และแยกข้อกำหนด
-
-#### Extracted Fields
-- Template Name (ชื่อ Template)
-- Template Type (ประเภทสัญญา)
-- Description (คำอธิบาย)
-- Clauses (ข้อกำหนดแยกเป็นข้อๆ)
-
-#### System Prompt Setting
-- **Customizable Prompt**: ปรับแต่ง Prompt สำหรับ AI
-- **Test Prompt**: ทดสอบ Prompt ก่อนใช้จริง
-- **Reset to Default**: กลับไปใช้ค่าเริ่มต้น
-
-**การใช้งาน**:
-1. ไปที่ Settings > ตัวอย่างสัญญา > สร้าง Template ใหม่
-2. คลิก "นำเข้าด้วย AI"
-3. อัปโหลดไฟล์สัญญา
-4. (Optional) ปรับแต่ง Prompt
-5. กด "ถอดความด้วย AI"
-6. แก้ไขข้อมูลที่ได้รับ (ถ้าจำเป็น)
-7. บันทึก Template
-
----
-
-## 6. AI & Automation
-
-### 6.1 AI Provider Management
-
-#### Provider Types
-- **Ollama**: Local AI models
-- **OpenAI**: GPT-3.5, GPT-4
-- **OpenAI-Compatible**: รองรับ API อื่นๆ
-
-#### Model Types
-- **LLM Models**: สำหรับสร้างข้อความ วิเคราะห์
-- **Embedding Models**: สำหรับ RAG, Vector Search
-
-#### Configuration
-- **Base URL**: กำหนด endpoint
-- **API Key**: จัดการ API keys
-- **Model Selection**: เลือกรุ่นโมเดล
-- **Parameters**: Temperature, Max Tokens, etc.
-
-### 6.2 AI Features
-- **Auto Extract**: ถอดความเอกสารอัตโนมัติ
-- **Smart Classification**: จัดหมวดหมู่เอกสาร
-- **Anomaly Detection**: ตรวจจับความผิดปกติ
-- **Contract Analysis**: วิเคราะห์สัญญา
-
-### 6.3 Agent System
-- **AI Agents**: ตัวแทนอัตโนมัติสำหรับงานเฉพาะ
-- **Trigger System**: กำหนดเงื่อนไขการทำงาน
-- **Workflow Automation**: สร้าง Workflow อัตโนมัติ
-- **Knowledge Base Integration**: เชื่อมต่อกับ Knowledge Base
-
----
-
-## 7. Knowledge Base & RAG
-
-### 7.1 Knowledge Base Management
-- **Create KB**: สร้าง Knowledge Base ใหม่
-- **Upload Documents**: อัปโหลดเอกสารเข้า KB
-- **Categories**: จัดหมวดหมู่เอกสาร
-
-### 7.2 RAG Configuration
-
-#### Embedding Settings
-- **Embedding Model**: เลือกจาก AI Providers
-  - Dropdown แสดงเฉพาะ Embedding Models
-  - แสดงรายละเอียด Provider และ Model
-
-#### Chunk Configuration
-- **Chunk Size**:
-  - 256 tokens (เอกสารสั้น)
-  - 512 tokens (ค่าเริ่มต้น)
-  - 1024 tokens (เอกสารยาว)
-  - 2048 tokens (เอกสารซับซ้อน)
-
-- **Chunk Overlap**:
-  - 0 tokens (ไม่ทับซ้อน)
-  - 25, 50 (ค่าเริ่มต้น), 100, 200 tokens
-
-### 7.3 GraphRAG
-- **Knowledge Graph**: สร้างกราฟความสัมพันธ์
-- **Entity Extraction**: ดึง Entities จากเอกสาร
-- **Relationship Mapping**: แสดงความสัมพันธ์
-- **Graph Visualization**: มุมมองกราฟแบบ interactive
-
----
-
-## 8. Notification System
-
-### 8.1 Multi-Level Notifications
-
-#### Global Notifications (ระดับระบบ)
-- **SMTP Configuration**: ตั้งค่าเซิร์ฟเวอร์อีเมล
-- **Email Templates**: แม่แบบอีเมล
-- **System-wide Alerts**: แจ้งเตือนทั้งระบบ
-
-#### Per-User Notifications
-- **Individual Settings**: ตั้งค่าแยกตามผู้ใช้
-- **Channel Selection**: Email, In-app, Push
-- **Frequency**: Real-time, Daily digest, Weekly
-
-### 8.2 Notification Recipients
-- **Role-based**: ตำแหน่งในองค์กร
-- **Custom Groups**: กลุ่มผู้รับแจ้งเตือนเอง
-- **Dynamic Rules**: เงื่อนไขการเลือกผู้รับแบบ dynamic
-
-### 8.3 Notification Types
-- **Contract Alerts**: สัญญาใกล้หมดอายุ, งานล่าช้า
-- **Document Notifications**: เอกสารใหม่, เอกสารรออนุมัติ
-- **System Notifications**: การอัปเดตระบบ, การบำรุงรักษา
-- **Custom Triggers**: กำหนดเงื่อนไขเองได้
-
-### 8.4 Notification Settings UI
-- **Global Settings Tab**: ตั้งค่าระดับระบบ
-- **User Settings Tab**: ตั้งค่ารายบุคคล
-- **Recipients Management**: จัดการผู้รับแจ้งเตือน
-- **Test Email**: ทดสอบการส่งอีเมล
-
----
-
-## 9. Organization & Access Control
-
-### 9.1 Organization Structure
-- **Departments**: สร้างแผนก/กอง
-- **Positions**: ตำแหน่งในองค์กร
-- **Hierarchy**: โครงสร้างลำดับชั้น
-
-### 9.2 User Management
-- **User CRUD**: สร้าง แก้ไข ลบ ผู้ใช้
-- **Role Assignment**: กำหนดบทบาท
-- **Department Assignment**: จัดการแผนก
-
-### 9.3 Role & Permissions
-- **Super Admin**: ควบคุมทั้งระบบ
-- **Admin**: จัดการข้อมูลหลัก
-- **Manager**: จัดการสัญญาในสังกัด
-- **User**: ผู้ใช้ทั่วไป
-- **Custom Roles**: สร้างบทบาทเองได้
-
-### 9.4 Access Control
-- **Resource-based**: ควบคุมการเข้าถึงทรัพยากร
-- **Action-based**: ควบคุมการกระทำ (Create, Read, Update, Delete)
-- **Field-level**: ควบคุมการเข้าถึงฟิลด์เฉพาะ
-
----
-
-## 10. System Settings
-
-### 10.1 Security Settings
-- **Password Policy**: นโยบายรหัสผ่าน
-- **Session Timeout**: เวลาหมดอายุเซสชัน
-- **IP Whitelist**: จำกัด IP ที่เข้าใช้ได้
-- **Audit Log**: บันทึกการเข้าใช้งาน
-
-### 10.2 OCR Settings
-- **Engine Selection**: Tesseract, Typhoon AI, Custom API
-- **Language**: ภาษาที่รองรับ (ไทย, อังกฤษ)
-- **Image Enhancement**: ปรับปรุงคุณภาพรูปภาพ
-- **Confidence Threshold**: เกณฑ์ความมั่นใจ
-
-### 10.3 AI Provider Settings
-- **Multiple Providers**: จัดการหลาย Provider
-- **Active Selection**: เลือก Provider ที่ใช้งาน
-- **Model Configuration**: ตั้งค่าโมเดลแต่ละตัว
-- **Health Check**: ตรวจสอบสถานะ Provider
-
-### 10.4 RAG Settings
-- **Embedding Model**: เลือกโมเดลสำหรับ Embedding
-- **Chunk Configuration**: ตั้งค่า Chunk Size และ Overlap
-- **Vector Store**: กำหนด Vector Database
-
-### 10.5 Template Settings
-- **System Prompt**: ตั้งค่า Prompt สำหรับ AI Extraction
-- **Default Templates**: กำหนด Template เริ่มต้น
-- **Template Types**: จัดการประเภทสัญญา
-
----
-
-## 🏗️ Technical Architecture
-
-### Backend Stack
-- **Framework**: FastAPI (Python)
-- **Database**: PostgreSQL + pgvector
-- **Cache**: Redis
-- **Search**: Elasticsearch
-- **Graph DB**: Neo4j
-- **Queue**: Celery + Redis
-- **Storage**: MinIO
-
-### Frontend Stack
-- **Framework**: React 18 + TypeScript
-- **Build Tool**: Vite
-- **Styling**: Tailwind CSS
-- **State**: React Hooks
-- **Icons**: Lucide React
-
-### AI/ML Stack
-- **LLM**: Ollama, OpenAI, Custom endpoints
-- **Embeddings**: Support multiple embedding models
-- **RAG**: Custom RAG implementation with pgvector
-- **OCR**: Tesseract, Typhoon AI
-
-### Infrastructure
-- **Containerization**: Docker + Docker Compose
-- **Reverse Proxy**: Nginx
-- **Monitoring**: Built-in health checks
-
----
-
-## 🚀 Getting Started
-
-### 1. Initial Setup
-```bash
-# Clone repository
-git clone https://github.com/n00n0i/gov-contract-platform.git
-
-# Start services
-cd gov-contract-platform/infra
-docker compose up -d
-
-# Access
-Frontend: http://localhost:3000
-Backend: http://localhost:8000
+```
+🌐 เปิดเบราว์เซอร์ → พิมพ์: http://localhost:3000
 ```
 
-### 2. Default Login
-- **Username**: admin
-- **Password**: admin123
+**ข้อมูลล็อกอินเริ่มต้น:**
+| ช่อง | ค่า |
+|-----|-----|
+| ชื่อผู้ใช้ | `admin` |
+| รหัสผ่าน | `admin123` |
 
-### 3. First Steps
-1. ตั้งค่า AI Providers (Settings > ตั้งค่า AI Models)
-2. ตั้งค่า SMTP (Settings > การแจ้งเตือน)
-3. สร้างผู้ใช้และกำหนดสิทธิ์
-4. เริ่มสร้างสัญญา!
+> 💡 **ทิป**: หลังล็อกอินครั้งแรก ควรเปลี่ยนรหัสผ่านทันที!
 
 ---
 
-## 📚 API Documentation
+## 🔐 การล็อกอินและความปลอดภัย
 
-API documentation สามารถดูได้ที่:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+### 2FA (Two-Factor Authentication) คืออะไร?
+
+**อธิบายง่ายๆ**: นอกจากรหัสผ่านแล้ว ต้องมีรหัสเพิ่มเติมจากโทรศัพท์มือถือ
+
+**เหมือนกับ**: ธนาคารที่ส่ง OTP มาโทรศัพท์เวลาโอนเงิน
+
+**วิธีตั้งค่า:**
+```
+1. ไปที่: ตั้งค่า → ความปลอดภัย
+2. หัวข้อ: "การยืนยันตัวตนแบบสองขั้นตอน"
+3. กด: "ตั้งค่า 2FA"
+4. ดาวน์โหลดแอป: Google Authenticator หรือ Authy
+5. สแกน QR Code ที่แสดงบนหน้าจอ
+6. กรอกรหัส 6 ตัวจากโทรศัพท์ → กดยืนยัน
+```
+
+**⚠️ สำคัญ**: บันทึก "รหัสสำรอง" ไว้ในกรณีโทรศัพท์หาย!
 
 ---
 
-## 🔄 Changelog
+## 📊 หน้า Dashboard
 
-### Latest Features
-- ✅ Vendor Management with Bulk Actions
-- ✅ Email Verification for Vendors
-- ✅ System Flag Protection
-- ✅ AI-Powered Template Import
-- ✅ Customizable Extraction Prompt
-- ✅ RAG Settings (Embedding & Chunk)
-- ✅ Multi-level Notification System
-- ✅ GraphRAG Integration
+### หน้านี้แสดงอะไรบ้าง?
+
+```
+┌─────────────────────────────────────────────┐
+│  📊 Dashboard - ภาพรวมระบบ                   │
+├─────────────────────────────────────────────┤
+│                                              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐   │
+│  │ สัญญา   │ │ ผู้รับจ้าง│ │ เอกสาร  │   │
+│  │   156   │ │    89    │ │   234   │   │
+│  └──────────┘ └──────────┘ └──────────┘   │
+│                                              │
+│  📈 กราฟ: มูลค่าสัญญารายเดือน               │
+│                                              │
+│  ⚠️ แจ้งเตือน:                              │
+│     • สัญญาใกล้หมดอายุ (5 รายการ)          │
+│     • งานล่าช้า (2 รายการ)                  │
+│                                              │
+└─────────────────────────────────────────────┘
+```
+
+**การใช้งาน:**
+- **การ์ดตัวเลข**: คลิกเพื่อดูรายละเอียด
+- **กราฟ**: แสดงแนวโน้ม 12 เดือน
+- **แจ้งเตือน**: คลิกเพื่อไปหน้าจัดการ
 
 ---
 
-## 🤝 Support
+## 👥 การจัดการผู้รับจ้าง (Vendors)
 
-สำหรับคำถามหรือปัญหา:
-- ตรวจสอบ Logs: `docker compose logs -f`
-- API Health Check: `http://localhost:8000/health`
-- GitHub Issues: [Report Issue](https://github.com/n00n0i/gov-contract-platform/issues)
+### ผู้รับจ้างคือใคร?
+
+**คำอธิบาย**: บริษัทหรือบุคคลที่รับจ้างทำสัญญากับหน่วยงาน
+
+**ตัวอย่าง**: 
+- บริษัทก่อสร้างที่รับเหมาสร้างอาคาร
+- บริษัท IT ที่รับจ้างพัฒนาระบบ
+- บุคคลที่รับจ้างเป็นที่ปรึกษา
+
+### ประเภทผู้รับจ้าง
+
+| ประเภท | อธิบาย | ตัวอย่าง |
+|--------|--------|---------|
+| **นิติบุคคล** | บริษัท จำกัด | บริษัท ก่อสร้างไทย จำกัด |
+| **บุคคลธรรมดา** | คนทั่วไป | นายสมชาย ใจดี |
+| **ห้างหุ้นส่วน** | หจก. | หจก. ซ่อมรถกลาง |
+| **สหกรณ์** | องค์กรสมาชิก | สหกรณ์ออมทรัพย์ |
+| **รัฐวิสาหกิจ** | องค์กรรัฐ | การไฟฟ้าฝ่ายผลิต |
+| **อื่นๆ** | ไม่เข้าข้างต้น | - |
+
+### สถานะผู้รับจ้าง (เข้าใจง่าย)
+
+```
+🟢 พร้อมใช้งาน  → ใช้งานได้ตามปกติ
+⚪ ไม่ใช้งาน    → หยุดชั่วคราว (แต่ข้อมูลยังอยู่)
+🟡 รอตรวจสอบ   → สร้างใหม่ รอเจ้าหน้าที่ตรวจสอบ
+🟠 ระงับชั่วคราว → มีปัญหาระหว่างตรวจสอบ
+🔴 แบล็คลิสต์   → ห้ามทำสัญญา (ทำผิดร้ายแรง)
+```
+
+### Email Verification (ยืนยันอีเมล)
+
+**ทำไมต้องยืนยัน?**
+- ป้องกันการใส่อีเมลผิด
+- ใช้ส่งเอกสารได้จริง
+- แสดงความน่าเชื่อถือ
+
+**วิธียืนยัน:**
+```
+1. ไปที่หน้า ผู้รับจ้าง → รายละเอียดผู้รับจ้าง
+2. ดูที่ข้อมูลติดต่อ
+3. ถ้าอีเมลมี ⚠️ แสดงว่ายังไม่ยืนยัน
+4. กดปุ่ม "ยืนยันอีเมล"
+5. ระบบจะเช็คว่าอีเมลใช้งานได้จริง
+```
+
+> 💡 **ทิป**: ถ้าผู้รับจ้างบอกว่าอีเมลถูกต้อง แต่ระบบไม่ยืนยัน ให้ตรวจสอบ Spam folder
+
+### Bulk Actions (จัดการหลายรายการ)
+
+**เมื่อไหร่ใช้?**: ต้องการเปลี่ยนสถานะหรือลบหลายคนพร้อมกัน
+
+**วิธีใช้:**
+```
+1. ไปที่หน้า ผู้รับจ้าง
+2. ติ๊ก ☑️ หน้าชื่อผู้รับจ้างที่ต้องการ
+   (หรือติ๊กหัวตารางเพื่อเลือกทั้งหมด)
+3. แถบปุ่มจะโผล่ขึ้นด้านบน:
+   [เปิดใช้งาน] [ปิดใช้งาน] [ลบ]
+4. กดปุ่มที่ต้องการ
+5. ยืนยันการทำรายการ
+```
+
+**⚠️ ข้อควรระวัง**:
+- ข้อมูลระบบ (มี Badge สีม่วง) ลบไม่ได้
+- การลบเป็น Soft Delete (ยังกู้คืนได้จาก Backend)
+
+---
+
+## 📄 การจัดการสัญญา
+
+### ขั้นตอนสร้างสัญญา
+
+```
+ขั้นตอนที่ 1: ข้อมูลพื้นฐาน
+├─ ชื่อสัญญา: สัญญาจ้างก่อสร้างอาคารสำนักงาน
+├─ เลขที่สัญญา: 64/2566
+├─ ประเภท: ก่อสร้าง
+└─ มูลค่า: 5,000,000 บาท
+
+ขั้นตอนที่ 2: ผู้เกี่ยวข้อง
+├─ ผู้ว่าจ้าง: สำนักงานปลัดกระทรวง
+└─ ผู้รับจ้าง: บริษัท ก่อสร้างไทย จำกัด
+
+ขั้นตอนที่ 3: ระยะเวลา
+├─ วันเริ่มสัญญา: 01/01/2566
+├─ วันสิ้นสุด: 31/12/2566
+└─ ระยะเวลา: 365 วัน
+
+ขั้นตอนที่ 4: เอกสาร
+└─ อัปโหลด: แบบแปลน, TOR, ใบเสนอราคา
+```
+
+### สถานะสัญญา
+
+```
+[Draft] → [Pending Approval] → [Active] → [Completed]
+  ↑           ↓                    ↓
+  └──── [Rejected]              [Terminated]
+```
+
+| สถานะ | ความหมาย | ใครเปลี่ยนได้ |
+|-------|----------|---------------|
+| **Draft** | ร่างสัญญา | ผู้สร้าง |
+| **Pending** | รออนุมัติ | ระบบ (ส่งให้อนุมัติ) |
+| **Active** | กำลังใช้งาน | ผู้อนุมัติ |
+| **Completed** | ส่งมอบแล้ว | ผู้ดูแล |
+| **Terminated** | ยกเลิก | ผู้ดูแล |
+
+---
+
+## 📝 Template สัญญาและ AI
+
+### Template คืออะไร?
+
+**คำอธิบาย**: แม่แบบสัญญาที่ใช้ซ้ำได้ ไม่ต้องพิมพ์ใหม่ทุกครั้ง
+
+**เหมือนกับ**: ฟอร์ม Word ที่มีช่องกรอกพร้อมแล้ว
+
+### วิธีสร้าง Template ด้วย AI (สำคัญ!)
+
+**สถานการณ์**: มีสัญญาเก่าเป็น PDF อยากทำเป็น Template ใหม่
+
+**ขั้นตอน:**
+```
+1. ไปที่: ตั้งค่า → ตัวอย่างสัญญา
+2. กด: "สร้าง Template ใหม่"
+3. คลิก: "นำเข้าด้วย AI" (กล่องสีม่วง)
+4. อัปโหลดไฟล์:
+   ├─ ลากไฟล์มาวาง หรือ
+   └─ คลิกเลือกไฟล์ (PDF, DOCX, รูปภาพ)
+5. (Optional) ปรับแต่ง Prompt:
+   ├─ กด "ตั้งค่า Prompt"
+   └─ แก้ไขคำสั่งให้ AI (ถ้าต้องการ)
+6. กด: "ถอดความด้วย AI"
+7. รอประมาณ 10-30 วินาที
+8. ระบบจะกรอกข้อมูลให้อัตโนมัติ:
+   ├─ ชื่อ Template
+   ├─ ประเภทสัญญา
+   └─ ข้อกำหนดแยกเป็นข้อๆ
+9. ตรวจสอบและแก้ไข (ถ้าจำเป็น)
+10. กด: "บันทึก Template"
+```
+
+### System Prompt คืออะไร?
+
+**คำอธิบาย**: คำสั่งที่บอก AI ว่าให้ถอดความอย่างไร
+
+**ตัวอย่าง Default Prompt**:
+```
+"คุณเป็นระบบ AI สำหรับถอดความสัญญา...
+จากเอกสารที่ให้มา:
+1. แยกข้อกำหนดเป็นข้อๆ
+2. ตั้งชื่อข้อให้เข้าใจง่าย
+3. สรุปเนื้อหาแต่ละข้อ"
+```
+
+**เมื่อไหร่ต้องแก้ Prompt?**
+- ต้องการให้เน้นข้อเฉพาะ (เช่น เน้นเรื่องการเงิน)
+- เอกสารมีรูปแบบพิเศษ
+- AI ถอดความไม่ตรงต้องการ
+
+**วิธีแก้ Prompt:**
+```
+1. ไปที่: ตั้งค่า → ตัวอย่างสัญญา
+2. เลื่อนลงมาที่: "ตั้งค่า AI Extraction Prompt"
+3. แก้ไขข้อความในช่อง
+4. กด "ทดสอบ Prompt" เพื่อลองก่อน
+5. ถ้าพอใจ กด "บันทึก"
+```
+
+---
+
+## 🤖 ระบบ AI และ Automation
+
+### AI Provider คืออะไร?
+
+**คำอธิบาย**: แหล่งที่มาของ AI ที่ระบบใช้คิด
+
+**ตัวเลือกที่มี:**
+
+| Provider | ใช้เมื่อ | ข้อดี | ข้อเสีย |
+|----------|---------|--------|---------|
+| **Ollama** | มีเซิร์ฟเวอร์เอง | ฟรี, ข้อมูลไม่ออกนอก | ต้องตั้งเซิร์ฟเวอร์ |
+| **OpenAI** | ต้องการความแม่นยำสูง | แม่นยำ, เร็ว | มีค่าใช้จ่าย |
+| **Typhoon** | ใช้ภาษาไทย | เข้าใจภาษาไทยดี | ต้องมี API Key |
+
+### วิธีเพิ่ม AI Provider
+
+```
+1. ไปที่: ตั้งค่า → ตั้งค่า AI Models
+2. เลือกแท็บ: "Embedding Models" หรือ "LLM Models"
+3. กด: "เพิ่ม Provider ใหม่"
+4. กรอกข้อมูล:
+   ├─ ชื่อ: Ollama Local
+   ├─ ประเภท: Ollama
+   ├─ URL: http://localhost:11434
+   ├─ API Key: (ถ้ามี)
+   └─ โมเดล: llama3.1
+5. กด: "ทดสอบการเชื่อมต่อ"
+6. ถ้าขึ้น "เชื่อมต่อสำเร็จ" → กด "บันทึก"
+```
+
+---
+
+## 📚 Knowledge Base และ RAG
+
+### Knowledge Base คืออะไร?
+
+**คำอธิบาย**: คลังความรู้ที่ AI อ่านแล้วตอบคำถามได้
+
+**เหมือนกับ**: ห้องสมุดที่ AI เป็นเจ้าหน้าที่
+
+**ใช้ทำอะไร?**
+- ถาม AI เกี่ยวกับระเบียบจัดซื้อจัดจ้าง
+- ค้นหาข้อมูลจากเอกสารเก่า
+- ตรวจสอบว่าสัญญาถูกต้องไหม
+
+### RAG คืออะไร?
+
+**ย่อมาจาก**: Retrieval-Augmented Generation
+
+**คำอธิบายง่ายๆ**: AI อ่านเอกสารก่อน แล้วค่อยตอบ
+
+**เหมือนกับ**: นักเรียนเปิดหนังสือตอบข้อสอบ
+
+### ตั้งค่า RAG (สำคัญ!)
+
+#### 1. Embedding Model
+**คืออะไร?**: โมเดลที่แปลงข้อความเป็นตัวเลข (เพื่อให้คอมพิวเตอร์เข้าใจ)
+
+**เลือกอย่างไร?**
+```
+ถ้าใช้ Ollama Local → เลือก: nomic-embed-text
+ถ้าใช้ OpenAI → เลือก: text-embedding-3-small
+ถ้าเอกสารภาษาไทย → เลือกโมเดลที่รองรับภาษาไทย
+```
+
+#### 2. Chunk Size (ขนาดชิ้น)
+**คืออะไร?**: แบ่งเอกสารเป็นชิ้นๆ ชิ้นละกี่ตัวอักษร
+
+**เลือกอย่างไร?**
+
+| ขนาด | เหมาะกับ | ผลลัพธ์ |
+|------|----------|---------|
+| **256** | เอกสารสั้น 1-2 หน้า | ตอบเร็ว แต่อาจไม่ครบ |
+| **512** | เอกสารทั่วไป | สมดุล (แนะนำ) |
+| **1024** | เอกสารยาว | ตอบละเอียด แต่ช้า |
+| **2048** | เอกสารซับซ้อนมาก | ละเอียดที่สุด |
+
+**ตัวอย่าง**: 
+- ระเบียบ 10 หน้า → เลือก 512
+- คู่มือ 100 หน้า → เลือก 1024
+
+#### 3. Chunk Overlap (ทับซ้อน)
+**คืออะไร?**: ให้ชิ้นที่ 1 และชิ้นที่ 2 มีข้อความซ้ำกันกี่ตัวอักษร
+
+**ทำไมต้องทับซ้อน?**: ป้องกันข้อมูลขาดตอนตรงรอยต่อ
+
+**เลือกอย่างไร?**
+- **0**: เร็วที่สุด แต่อาจขาดข้อมูล
+- **50**: ค่าเริ่มต้น สมดุล (แนะนำ)
+- **200**: ละเอียดที่สุด แต่ใช้พื้นที่มาก
+
+**วิธีตั้งค่า:**
+```
+1. ไปที่: ตั้งค่า → Knowledge Base
+2. เลื่อนลงมาที่: "การตั้งค่า RAG"
+3. เลือก:
+   ├─ Embedding Model: (เลือกจากรายการ)
+   ├─ Chunk Size: 512
+   └─ Chunk Overlap: 50
+4. กด: "บันทึกการตั้งค่า"
+```
+
+---
+
+## 🔔 การแจ้งเตือน
+
+### ระดับการแจ้งเตือน
+
+```
+┌─────────────────────────────────────────┐
+│ ระดับที่ 1: Global (ทั้งระบบ)           │
+│ ├─ ตั้งค่า SMTP (เซิร์ฟเวอร์อีเมล)      │
+│ ├─ ตั้งค่า Template อีเมล              │
+│ └─ ตั้งค่า Default                     │
+├─────────────────────────────────────────┤
+│ ระดับที่ 2: Per-User (รายบุคคล)         │
+│ ├─ แต่ละคนเลือกรับอะไร                 │
+│ ├─ ช่องทางที่ต้องการ (อีเมล/In-app)     │
+│ └─ ความถี่ (ทันที/รายวัน/รายสัปดาห์)   │
+└─────────────────────────────────────────┘
+```
+
+### วิธีตั้งค่าแจ้งเตือน
+
+**สำหรับผู้ดูแลระบบ (Global):**
+```
+1. ไปที่: ตั้งค่า → การแจ้งเตือน
+2. แท็บ: "ตั้งค่าทั่วไป"
+3. ตั้งค่า:
+   ├─ SMTP Server: smtp.gmail.com
+   ├─ SMTP Port: 587
+   ├─ Username: your-email@gmail.com
+   └─ Password: your-app-password
+4. กด: "ทดสอบการส่งอีเมล"
+5. ถ้าสำเร็จ → กด "บันทึก"
+```
+
+**สำหรับผู้ใช้ทั่วไป:**
+```
+1. ไปที่: ตั้งค่า → การแจ้งเตือน
+2. แท็บ: "การแจ้งเตือนของฉัน"
+3. เลือกว่าจะรับอะไรบ้าง:
+   ☑️ สัญญาใกล้หมดอายุ
+   ☑️ งานล่าช้า
+   ☐ เอกสารใหม่ (ไม่เลือก)
+4. เลือกช่องทาง:
+   ☑️ อีเมล
+   ☑️ แจ้งเตือนบนหน้าเว็บ
+5. กด: "บันทึกการตั้งค่า"
+```
+
+---
+
+## ⚙️ การตั้งค่าระบบ
+
+### OCR Settings (ถอดความเอกสาร)
+
+**OCR คืออะไร?**: แปลงรูปภาพตัวอักษรเป็นข้อความที่คอมพิวเตอร์อ่านได้
+
+**ใช้เมื่อไหร่?**: อัปโหลดเอกสารสแกน (PDF รูปภาพ)
+
+**ตัวเลือก:**
+- **Tesseract**: ฟรี ใช้ในเครื่อง
+- **Typhoon AI**: แม่นยำกว่า แต่ต้องมี API Key
+- **Custom API**: ใช้ API ขององค์กรเอง
+
+### AI Features (ฟีเจอร์ AI)
+
+**Auto Extract**: ถอดความเอกสารอัตโนมัติเมื่ออัปโหลด  
+**Smart Classification**: จัดหมวดหมู่เอกสารอัตโนมัติ  
+**Anomaly Detection**: ตรวจจับความผิดปกติในสัญญา  
+**Contract Analysis**: วิเคราะห์สัญญาว่ามีความเสี่ยงอะไร
+
+---
+
+## 🔧 แก้ไขปัญหา
+
+### ปัญหาที่พบบ่อย
+
+#### 1. ล็อกอินไม่ได้ / หมุนค้าง
+
+**สาเหตุ**: Backend ไม่ตอบสนอง
+
+**แก้ไข:**
+```bash
+# Restart backend
+cd gov-contract-platform/infra
+docker compose restart backend
+
+# รอ 10 วินาที แล้วลองใหม่
+```
+
+#### 2. AI ไม่ตอบ / ถอดความไม่ได้
+
+**สาเหตุ**: AI Provider ไม่ทำงาน
+
+**แก้ไข:**
+```
+1. ไปที่: ตั้งค่า → ตั้งค่า AI Models
+2. ดูที่ Provider ที่ใช้งาน
+3. กดปุ่ม "ทดสอบ" ถ้าขึ้นแดง = ผิด
+4. ตรวจสอบ:
+   ├─ URL ถูกต้องไหม
+   ├─ API Key หมดอายุไหม
+   └─ เซิร์ฟเวอร์ AI เปิดอยู่ไหม
+```
+
+#### 3. อีเมลไม่ส่ง
+
+**สาเหตุ**: SMTP ตั้งค่าผิด
+
+**แก้ไข:**
+```
+1. ตรวจสอบ SMTP Server ถูกต้องไหม
+2. ใช้ App Password (ไม่ใช่รหัสผ่านปกติ) สำหรับ Gmail
+3. เปิด Less Secure Apps (ถ้าใช้บัญชีเก่า)
+4. ทดสอบการส่งก่อนบันทึก
+```
+
+#### 4. อัปโหลดไฟล์ไม่ได้
+
+**สาเหตุ**: MinIO หรือ Network มีปัญหา
+
+**แก้ไข:**
+```bash
+# ตรวจสอบ MinIO
+docker compose ps minio
+
+# ถ้าไม่ Running
+docker compose restart minio
+```
+
+### ตรวจสอบสถานะระบบ
+
+```bash
+# ดูทุก Service
+docker compose ps
+
+# ดู Logs
+docker compose logs -f backend
+docker compose logs -f frontend
+
+# Health Check
+curl http://localhost:8000/health
+curl http://localhost:3000
+```
+
+---
+
+## 💡 Best Practices (แนวทางปฏิบัติที่ดี)
+
+### สำหรับผู้ดูแลระบบ
+
+1. **สำรองข้อมูล**: ตั้ง cron job สำรอง Database ทุกวัน
+2. **Monitor Logs**: ตรวจสอบ Logs อย่างน้อยสัปดาห์ละครั้ง
+3. **Update Regularly**: อัปเดตระบบเมื่อมีเวอร์ชันใหม่
+4. **Test AI Providers**: ทดสอบ AI ก่อนใช้งานจริง
+
+### สำหรับผู้ใช้งาน
+
+1. **ตรวจสอบข้อมูล**: ตรวจสอบข้อมูล AI ที่ถอดความก่อนบันทึก
+2. **ใช้ Template**: สร้าง Template เพื่อประหยัดเวลา
+3. **อัปเดตสถานะ**: อัปเดตสถานะสัญญาอย่างสม่ำเสมอ
+4. **Verify Email**: ยืนยันอีเมลผู้รับจ้างเพื่อความถูกต้อง
+
+---
+
+## 📞 ติดต่อสนับสนุน
+
+**GitHub Issues**: https://github.com/n00n0i/gov-contract-platform/issues
+
+**ตรวจสอบ Logs**:
+```bash
+cd gov-contract-platform/infra
+docker compose logs -f --tail 100
+```
 
 ---
 
 **Version**: 2.0  
-**Last Updated**: 2026-02-26  
-**Maintainer**: n00n0i
+**Last Updated**: กุมภาพันธ์ 2026  
+**Author**: n00n0i
+
+> 🎉 **ขอให้ใช้งานอย่างมีความสุข!** หากมีคำถามเพิ่มเติม สามารถเปิด Issue ใน GitHub ได้เลย
