@@ -12,11 +12,14 @@ import {
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
-import { 
+import {
   getNotificationSettings, saveNotificationSettings,
   getPreferences, savePreferences,
   getOCRSettings, saveOCRSettings,
   getAISettings, saveAISettings, saveAIFeatures,
+  getRagSettings, saveRagSettings,
+  getGraphRAGSettings, saveGraphRAGSettings,
+  getGraphStats, searchGraphEntities,
   checkHealth
 } from '../services/settingsService'
 import { 
@@ -1007,6 +1010,26 @@ export default function Settings() {
     chunkOverlap: 50
   })
 
+  // GraphRAG Settings
+  const [graphragSettings, setGraphragSettings] = useState({
+    auto_extract_on_upload: false,
+    extract_relationships: true,
+    min_confidence: 0.7
+  })
+
+  // GraphRAG Stats
+  const [graphStats, setGraphStats] = useState({
+    total_entities: 0,
+    total_relationships: 0,
+    total_documents: 0
+  })
+  const [graphStatsLoading, setGraphStatsLoading] = useState(false)
+
+  // GraphRAG Entity Search
+  const [entitySearchQuery, setEntitySearchQuery] = useState('')
+  const [entitySearchResults, setEntitySearchResults] = useState<any[]>([])
+  const [entitySearchLoading, setEntitySearchLoading] = useState(false)
+
   // Load Templates and Agents
   useEffect(() => {
     fetchTemplates()
@@ -1296,11 +1319,62 @@ export default function Settings() {
       if (ai) {
         if (ai.providers) setAiProviders(ai.providers)
         if (ai.activeLLMId) setActiveLLMId(ai.activeLLMId)
-        if (ai.activeEmbeddingId) setActiveEmbeddingId(ai.activeEmbeddingId)
+        if (ai.activeEmbeddingId) {
+          setActiveEmbeddingId(ai.activeEmbeddingId)
+          setRagSettings(prev => ({ ...prev, embeddingProviderId: ai.activeEmbeddingId }))
+        }
         if (ai.features) setAiFeatures(prev => ({...prev, ...ai.features}))
+      }
+
+      // Load RAG settings
+      try {
+        const rag = await getRagSettings()
+        if (rag) setRagSettings(prev => ({ ...prev, ...rag }))
+      } catch (err) {
+        console.error('Failed to fetch RAG settings:', err)
+      }
+
+      // Load GraphRAG settings
+      try {
+        const grag = await getGraphRAGSettings()
+        if (grag) setGraphragSettings(prev => ({ ...prev, ...grag }))
+      } catch (err) {
+        console.error('Failed to fetch GraphRAG settings:', err)
       }
     } catch (err) {
       console.error('Failed to fetch settings:', err)
+    }
+  }
+
+  const fetchGraphStats = async () => {
+    setGraphStatsLoading(true)
+    try {
+      const stats = await getGraphStats()
+      if (stats) {
+        setGraphStats({
+          total_entities: stats.total_entities || 0,
+          total_relationships: stats.total_relationships || 0,
+          total_documents: stats.total_documents || 0
+        })
+      }
+    } catch (err) {
+      console.error('Failed to fetch graph stats:', err)
+    } finally {
+      setGraphStatsLoading(false)
+    }
+  }
+
+  const handleEntitySearch = async () => {
+    if (!entitySearchQuery.trim()) return
+    setEntitySearchLoading(true)
+    try {
+      const results = await searchGraphEntities(entitySearchQuery)
+      setEntitySearchResults(results || [])
+    } catch (err) {
+      console.error('Entity search failed:', err)
+      setEntitySearchResults([])
+    } finally {
+      setEntitySearchLoading(false)
     }
   }
 
@@ -1602,7 +1676,7 @@ export default function Settings() {
                 <span className="font-medium">Knowledge Base (RAG)</span>
               </button>
               <button
-                onClick={() => setActiveTab('graphrag')}
+                onClick={() => { setActiveTab('graphrag'); fetchGraphStats() }}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
                   activeTab === 'graphrag' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
                 }`}
@@ -3322,15 +3396,22 @@ export default function Settings() {
                   {/* Save RAG Settings Button */}
                   <div className="mt-4 pt-4 border-t flex justify-end">
                     <button
-                      onClick={() => {
-                        // In production, save to backend
-                        setMessage({type: 'success', text: 'บันทึกการตั้งค่า RAG สำเร็จ'})
-                        setTimeout(() => setMessage(null), 3000)
+                      onClick={async () => {
+                        setSaving(true)
+                        try {
+                          await saveRagSettings(ragSettings)
+                          setMessage({ type: 'success', text: 'บันทึกการตั้งค่า RAG สำเร็จ' })
+                        } catch (err: any) {
+                          setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถบันทึกได้' })
+                        } finally {
+                          setSaving(false)
+                        }
                       }}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+                      disabled={saving}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50"
                     >
                       <Save className="w-4 h-4" />
-                      บันทึกการตั้งค่า
+                      {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
                     </button>
                   </div>
                 </div>
@@ -3426,15 +3507,21 @@ export default function Settings() {
                   {/* Graph Stats */}
                   <div className="grid grid-cols-3 gap-4 mb-6">
                     <div className="p-4 bg-blue-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-blue-600">0</p>
+                      <p className="text-2xl font-bold text-blue-600">
+                        {graphStatsLoading ? <span className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /> : graphStats.total_entities}
+                      </p>
                       <p className="text-sm text-blue-600/70">Entities (สิ่ง)</p>
                     </div>
                     <div className="p-4 bg-green-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-green-600">0</p>
+                      <p className="text-2xl font-bold text-green-600">
+                        {graphStatsLoading ? <span className="inline-block w-6 h-6 border-2 border-green-600 border-t-transparent rounded-full animate-spin" /> : graphStats.total_relationships}
+                      </p>
                       <p className="text-sm text-green-600/70">ความสัมพันธ์</p>
                     </div>
                     <div className="p-4 bg-purple-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-purple-600">0</p>
+                      <p className="text-2xl font-bold text-purple-600">
+                        {graphStatsLoading ? <span className="inline-block w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" /> : graphStats.total_documents}
+                      </p>
                       <p className="text-sm text-purple-600/70">เอกสาร</p>
                     </div>
                   </div>
@@ -3451,13 +3538,39 @@ export default function Settings() {
                     <div className="flex gap-3">
                       <input
                         type="text"
+                        value={entitySearchQuery}
+                        onChange={(e) => setEntitySearchQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleEntitySearch()}
                         placeholder="ค้นหา บุคคล, องค์กร, สัญญา..."
                         className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                       />
-                      <button className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">
+                      <button
+                        onClick={handleEntitySearch}
+                        disabled={entitySearchLoading}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {entitySearchLoading ? (
+                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        ) : null}
                         ค้นหา
                       </button>
                     </div>
+                    {entitySearchResults.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {entitySearchResults.map((entity: any) => (
+                          <div key={entity.id} className="flex items-center justify-between p-2 bg-white rounded border">
+                            <div>
+                              <span className="font-medium text-gray-900">{entity.name}</span>
+                              <span className="ml-2 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">{entity.type}</span>
+                            </div>
+                            <span className="text-xs text-gray-400">{(entity.confidence * 100).toFixed(0)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {entitySearchResults.length === 0 && entitySearchQuery && !entitySearchLoading && (
+                      <p className="mt-2 text-sm text-gray-500">ไม่พบ Entity ที่ตรงกับ "{entitySearchQuery}"</p>
+                    )}
                   </div>
                 </div>
 
@@ -3474,7 +3587,12 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">สกัด entities อัตโนมัติเมื่ออัพโหลดเอกสารใหม่</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" />
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={graphragSettings.auto_extract_on_upload}
+                          onChange={(e) => setGraphragSettings({ ...graphragSettings, auto_extract_on_upload: e.target.checked })}
+                        />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                       </label>
                     </div>
@@ -3484,7 +3602,12 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">สกัดความสัมพันธ์ระหว่าง entities</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" defaultChecked />
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={graphragSettings.extract_relationships}
+                          onChange={(e) => setGraphragSettings({ ...graphragSettings, extract_relationships: e.target.checked })}
+                        />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                       </label>
                     </div>
@@ -3498,10 +3621,33 @@ export default function Settings() {
                         min="0.5"
                         max="0.9"
                         step="0.1"
-                        defaultValue="0.7"
+                        value={graphragSettings.min_confidence}
+                        onChange={(e) => setGraphragSettings({ ...graphragSettings, min_confidence: parseFloat(e.target.value) })}
                         className="w-20 px-3 py-2 border rounded-lg text-center"
                       />
                     </div>
+                  </div>
+
+                  {/* Save GraphRAG Settings */}
+                  <div className="mt-4 pt-4 border-t flex justify-end">
+                    <button
+                      onClick={async () => {
+                        setSaving(true)
+                        try {
+                          await saveGraphRAGSettings(graphragSettings)
+                          setMessage({ type: 'success', text: 'บันทึกการตั้งค่า GraphRAG สำเร็จ' })
+                        } catch (err: any) {
+                          setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถบันทึกได้' })
+                        } finally {
+                          setSaving(false)
+                        }
+                      }}
+                      disabled={saving}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Save className="w-4 h-4" />
+                      {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า GraphRAG'}
+                    </button>
                   </div>
                 </div>
               </div>

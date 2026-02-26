@@ -482,7 +482,7 @@ def create_knowledge_base(
 ):
     """Create a new knowledge base"""
     import uuid
-    
+
     kb = KnowledgeBase(
         id=str(uuid.uuid4()),
         name=kb_data.name,
@@ -493,14 +493,42 @@ def create_knowledge_base(
         is_system=False,
         tags=kb_data.tags
     )
-    
+
     db.add(kb)
     db.commit()
-    
+
     return {
         "success": True,
         "message": "Knowledge base created",
         "data": kb.to_dict()
+    }
+
+
+@router.delete("/knowledge-bases/{kb_id}")
+def delete_knowledge_base(
+    kb_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Delete a knowledge base"""
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.user_id == user_id,
+        KnowledgeBase.is_system == False
+    ).first()
+
+    if not kb:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge base not found or cannot be deleted"
+        )
+
+    db.delete(kb)
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Knowledge base deleted"
     }
 
 

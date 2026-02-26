@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     TYPHOON_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    OLLAMA_URL: str = "http://ollama:11434"
     
     # OCR
     TESSERACT_CMD: str = "/usr/bin/tesseract"

@@ -61,6 +61,39 @@ export const saveAIFeatures = async (features: any) => {
   return response.data
 }
 
+// ============== RAG Settings ==============
+export const getRagSettings = async () => {
+  const response = await api.get('/settings/rag')
+  return response.data.data
+}
+
+export const saveRagSettings = async (settings: any) => {
+  const response = await api.post('/settings/rag', settings)
+  return response.data
+}
+
+// ============== GraphRAG Settings ==============
+export const getGraphRAGSettings = async () => {
+  const response = await api.get('/settings/graphrag')
+  return response.data.data
+}
+
+export const saveGraphRAGSettings = async (settings: any) => {
+  const response = await api.post('/settings/graphrag', settings)
+  return response.data
+}
+
+// ============== Graph Stats ==============
+export const getGraphStats = async () => {
+  const response = await api.get('/graph/stats')
+  return response.data.data
+}
+
+export const searchGraphEntities = async (query: string, limit = 20) => {
+  const response = await api.get(`/graph/entities/search?q=${encodeURIComponent(query)}&limit=${limit}`)
+  return response.data.data
+}
+
 // ============== Health Check ==============
 export const checkHealth = async () => {
   const response = await api.get('/health')

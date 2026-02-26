@@ -93,6 +93,18 @@ class AIFeaturesSettings(BaseModel):
     contract_analysis: bool = True
 
 
+class RAGSettings(BaseModel):
+    embeddingProviderId: str = "default-embedding"
+    chunkSize: int = 512
+    chunkOverlap: int = 50
+
+
+class GraphRAGSettings(BaseModel):
+    auto_extract_on_upload: bool = False
+    extract_relationships: bool = True
+    min_confidence: float = 0.7
+
+
 # ============== Helper Functions ==============
 
 def get_user_settings(db: Session, user_id: str) -> Dict[str, Any]:
@@ -614,13 +626,105 @@ def test_ai_provider(
         AIProvider.id == provider_id,
         AIProvider.user_id == user_id
     ).first()
-    
+
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-    
+
     # TODO: Implement actual connection test
     return {
         "success": True,
         "message": "Connection test passed",
         "provider": provider.name
+    }
+
+
+# ============== RAG Settings ==============
+
+@router.get("/rag")
+def get_rag_settings(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Get RAG configuration settings"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    prefs = user.preferences or {}
+    return {
+        "success": True,
+        "data": prefs.get("rag_settings", {
+            "embeddingProviderId": "default-embedding",
+            "chunkSize": 512,
+            "chunkOverlap": 50
+        })
+    }
+
+
+@router.post("/rag")
+def save_rag_settings(
+    settings: RAGSettings,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Save RAG configuration settings"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    prefs = user.preferences or {}
+    prefs["rag_settings"] = settings.model_dump()
+    user.preferences = prefs
+    db.commit()
+
+    logger.info(f"RAG settings updated for user {user_id}")
+    return {
+        "success": True,
+        "message": "RAG settings saved"
+    }
+
+
+# ============== GraphRAG Settings ==============
+
+@router.get("/graphrag")
+def get_graphrag_settings(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Get GraphRAG configuration settings"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    prefs = user.preferences or {}
+    return {
+        "success": True,
+        "data": prefs.get("graphrag_settings", {
+            "auto_extract_on_upload": False,
+            "extract_relationships": True,
+            "min_confidence": 0.7
+        })
+    }
+
+
+@router.post("/graphrag")
+def save_graphrag_settings(
+    settings: GraphRAGSettings,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Save GraphRAG configuration settings"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    prefs = user.preferences or {}
+    prefs["graphrag_settings"] = settings.model_dump()
+    user.preferences = prefs
+    db.commit()
+
+    logger.info(f"GraphRAG settings updated for user {user_id}")
+    return {
+        "success": True,
+        "message": "GraphRAG settings saved"
     }
