@@ -2260,7 +2260,7 @@ export default function Settings() {
                       {[
                         { value: 'dashboard', label: 'แดชบอร์ด', icon: Activity },
                         { value: 'contracts', label: 'สัญญา', icon: FileText },
-                        { value: 'vendors', label: 'คู่สัญญา', icon: Users }
+                        { value: 'vendors', label: 'ผู้รับจ้าง', icon: Users }
                       ].map(({ value, label, icon: Icon }) => (
                         <button
                           key={value}
