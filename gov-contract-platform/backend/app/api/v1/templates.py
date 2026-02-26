@@ -57,6 +57,36 @@ class TemplateUpdate(BaseModel):
     isDefault: Optional[bool] = None
 
 
+# ============== System Extraction Prompt ==============
+# In-memory storage for system prompt (in production, use database)
+system_extraction_prompt = {
+    "prompt": """คุณเป็นระบบ AI สำหรับถอดความสัญญาและสร้าง Template
+
+จากเอกสารสัญญาที่ให้มา กรุณา:
+1. วิเคราะห์และแยกข้อกำหนด (Clauses) ออกเป็นข้อๆ
+2. สร้างชื่อข้อ (title) ที่กระชับและเข้าใจง่าย
+3. สรุปเนื้อหา (content) ของแต่ละข้อให้ชัดเจน
+
+รูปแบบการตอบกลับ JSON:
+{
+    "template_name": "ชื่อ Template",
+    "template_type": "ประเภทสัญญา (เช่น จัดซื้อ, ก่อสร้าง, บริการ)",
+    "description": "คำอธิบายสั้นๆ",
+    "clauses": [
+        {"number": 1, "title": "ชื่อข้อ", "content": "เนื้อหา"},
+        {"number": 2, "title": "ชื่อข้อ", "content": "เนื้อหา"}
+    ]
+}
+
+กฎ:
+- แยกข้อให้มีโครงสร้างชัดเจน
+- ใช้ภาษาที่เป็นทางการแต่เข้าใจง่าย
+- รักษาความหมายตามต้นฉบับ
+- ถ้าไม่แน่ใจ ให้ใช้ข้อความต้นฉบับ""",
+    "updated_at": datetime.now().isoformat(),
+    "updated_by": "system"
+}
+
 # ============== Default Templates Data ==============
 
 DEFAULT_TEMPLATES = [
@@ -508,8 +538,9 @@ async def ai_extract_template(
                 detail="Could not extract sufficient text from file. Please ensure the file is readable."
             )
         
-        # Prepare prompt
-        prompt = custom_prompt or DEFAULT_TEMPLATE_EXTRACTION_PROMPT
+        # Prepare prompt - use system prompt if no custom prompt provided
+        global system_extraction_prompt
+        prompt = custom_prompt or system_extraction_prompt.get("prompt", "")
         full_prompt = f"{prompt}\n\nเอกสารสัญญา:\n{extracted_text[:8000]}"  # Limit to 8000 chars
         
         # Call AI service
@@ -630,3 +661,110 @@ async def test_extraction_prompt(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prompt test failed: {str(e)}")
+
+
+
+# ============== System Prompt Management ==============
+
+class SystemPromptUpdate(BaseModel):
+    prompt: str
+
+
+@router.get("/settings/extraction-prompt")
+def get_system_extraction_prompt(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Get the current system extraction prompt (admin only)"""
+    global system_extraction_prompt
+    
+    return {
+        "success": True,
+        "data": {
+            "prompt": system_extraction_prompt.get("prompt", ""),
+            "updated_at": system_extraction_prompt.get("updated_at"),
+            "updated_by": system_extraction_prompt.get("updated_by")
+        }
+    }
+
+
+@router.put("/settings/extraction-prompt")
+def update_system_extraction_prompt(
+    update: SystemPromptUpdate,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Update the system extraction prompt (admin only)"""
+    global system_extraction_prompt
+    
+    if not update.prompt or len(update.prompt.strip()) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Prompt must be at least 50 characters"
+        )
+    
+    system_extraction_prompt = {
+        "prompt": update.prompt.strip(),
+        "updated_at": datetime.now().isoformat(),
+        "updated_by": user_id
+    }
+    
+    logger.info(f"System extraction prompt updated by user {user_id}")
+    
+    return {
+        "success": True,
+        "message": "System extraction prompt updated successfully",
+        "data": {
+            "updated_at": system_extraction_prompt["updated_at"],
+            "updated_by": user_id
+        }
+    }
+
+
+@router.post("/settings/extraction-prompt/reset")
+def reset_system_extraction_prompt(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Reset system extraction prompt to default"""
+    global system_extraction_prompt
+    
+    default_prompt = """คุณเป็นระบบ AI สำหรับถอดความสัญญาและสร้าง Template
+
+จากเอกสารสัญญาที่ให้มา กรุณา:
+1. วิเคราะห์และแยกข้อกำหนด (Clauses) ออกเป็นข้อๆ
+2. สร้างชื่อข้อ (title) ที่กระชับและเข้าใจง่าย
+3. สรุปเนื้อหา (content) ของแต่ละข้อให้ชัดเจน
+
+รูปแบบการตอบกลับ JSON:
+{
+    "template_name": "ชื่อ Template",
+    "template_type": "ประเภทสัญญา (เช่น จัดซื้อ, ก่อสร้าง, บริการ)",
+    "description": "คำอธิบายสั้นๆ",
+    "clauses": [
+        {"number": 1, "title": "ชื่อข้อ", "content": "เนื้อหา"},
+        {"number": 2, "title": "ชื่อข้อ", "content": "เนื้อหา"}
+    ]
+}
+
+กฎ:
+- แยกข้อให้มีโครงสร้างชัดเจน
+- ใช้ภาษาที่เป็นทางการแต่เข้าใจง่าย
+- รักษาความหมายตามต้นฉบับ
+- ถ้าไม่แน่ใจ ให้ใช้ข้อความต้นฉบับ"""
+    
+    system_extraction_prompt = {
+        "prompt": default_prompt,
+        "updated_at": datetime.now().isoformat(),
+        "updated_by": user_id
+    }
+    
+    logger.info(f"System extraction prompt reset to default by user {user_id}")
+    
+    return {
+        "success": True,
+        "message": "System extraction prompt reset to default",
+        "data": {
+            "updated_at": system_extraction_prompt["updated_at"]
+        }
+    }

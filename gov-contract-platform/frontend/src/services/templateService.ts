@@ -115,3 +115,39 @@ export const testExtractionPrompt = async (
   })
   return response.data
 }
+
+// System Extraction Prompt Settings
+export const getSystemExtractionPrompt = async (): Promise<{
+  success: boolean
+  data: {
+    prompt: string
+    updated_at: string
+    updated_by: string
+  }
+}> => {
+  const response = await api.get('/templates/settings/extraction-prompt')
+  return response.data
+}
+
+export const updateSystemExtractionPrompt = async (prompt: string): Promise<{
+  success: boolean
+  message: string
+  data: {
+    updated_at: string
+    updated_by: string
+  }
+}> => {
+  const response = await api.put('/templates/settings/extraction-prompt', { prompt })
+  return response.data
+}
+
+export const resetSystemExtractionPrompt = async (): Promise<{
+  success: boolean
+  message: string
+  data: {
+    updated_at: string
+  }
+}> => {
+  const response = await api.post('/templates/settings/extraction-prompt/reset')
+  return response.data
+}
