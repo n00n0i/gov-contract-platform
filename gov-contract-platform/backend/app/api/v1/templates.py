@@ -3,13 +3,17 @@ Contract Templates API Routes - Manage contract templates
 """
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+import os
+import json
 
 from app.db.database import get_db
 from app.core.security import get_current_user_id, get_current_user_payload
 from app.core.logging import get_logger
+from app.services.ai.llm_service import LLMService
+from app.services.document.ocr_service import OCRService
 
 router = APIRouter(prefix="/templates", tags=["Templates"])
 logger = get_logger(__name__)
@@ -419,3 +423,210 @@ def list_template_types(
         "success": True,
         "data": types
     }
+
+
+
+# ============== AI Extraction ==============
+
+class AIExtractRequest(BaseModel):
+    custom_prompt: Optional[str] = None
+
+
+class AIExtractResponse(BaseModel):
+    success: bool
+    data: Dict[str, Any]
+    message: Optional[str] = None
+
+
+# Default prompt for contract extraction
+DEFAULT_TEMPLATE_EXTRACTION_PROMPT = """คุณเป็นระบบ AI สำหรับถอดความสัญญาและสร้าง Template
+
+จากเอกสารสัญญาที่ให้มา กรุณา:
+1. วิเคราะห์และแยกข้อกำหนด (Clauses) ออกเป็นข้อๆ
+2. สร้างชื่อข้อ (title) ที่กระชับและเข้าใจง่าย
+3. สรุปเนื้อหา (content) ของแต่ละข้อให้ชัดเจน
+
+รูปแบบการตอบกลับ JSON:
+{
+    "template_name": "ชื่อ Template",
+    "template_type": "ประเภทสัญญา (เช่น จัดซื้อ, ก่อสร้าง, บริการ)",
+    "description": "คำอธิบายสั้นๆ",
+    "clauses": [
+        {"number": 1, "title": "ชื่อข้อ", "content": "เนื้อหา"},
+        {"number": 2, "title": "ชื่อข้อ", "content": "เนื้อหา"}
+    ]
+}
+
+กฎ:
+- แยกข้อให้มีโครงสร้างชัดเจน
+- ใช้ภาษาที่เป็นทางการแต่เข้าใจง่าย
+- รักษาความหมายตามต้นฉบับ
+- ถ้าไม่แน่ใจ ให้ใช้ข้อความต้นฉบับ"""
+
+
+@router.post("/ai-extract", response_model=AIExtractResponse)
+async def ai_extract_template(
+    file: UploadFile = File(...),
+    custom_prompt: Optional[str] = Form(None),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Extract template clauses from uploaded contract file using AI
+    Supports PDF, DOCX, and image files
+    """
+    try:
+        # Validate file type
+        allowed_extensions = {'.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.tiff'}
+        file_ext = os.path.splitext(file.filename.lower())[1]
+        
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"
+            )
+        
+        # Read file content
+        content = await file.read()
+        
+        # Extract text using OCR or document parsing
+        if file_ext in {'.pdf', '.jpg', '.jpeg', '.png', '.tiff'}:
+            # Use OCR for PDFs and images
+            ocr_service = OCRService()
+            extracted_text = await ocr_service.extract_text(content, file_ext)
+        elif file_ext in {'.docx', '.doc'}:
+            # For DOCX, we'd need a document parser
+            # For now, use OCR as fallback
+            ocr_service = OCRService()
+            extracted_text = await ocr_service.extract_text(content, file_ext)
+        else:
+            extracted_text = content.decode('utf-8', errors='ignore')
+        
+        if not extracted_text or len(extracted_text.strip()) < 50:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not extract sufficient text from file. Please ensure the file is readable."
+            )
+        
+        # Prepare prompt
+        prompt = custom_prompt or DEFAULT_TEMPLATE_EXTRACTION_PROMPT
+        full_prompt = f"{prompt}\n\nเอกสารสัญญา:\n{extracted_text[:8000]}"  # Limit to 8000 chars
+        
+        # Call AI service
+        llm_service = LLMService()
+        ai_response = await llm_service.generate(
+            prompt=full_prompt,
+            model="typhoon",  # Use default model
+            temperature=0.3,
+            max_tokens=4000
+        )
+        
+        # Parse JSON response
+        try:
+            # Try to extract JSON from response
+            response_text = ai_response.get("text", "{}")
+            
+            # Find JSON in response
+            json_start = response_text.find('{')
+            json_end = response_text.rfind('}') + 1
+            
+            if json_start >= 0 and json_end > json_start:
+                json_str = response_text[json_start:json_end]
+                parsed_data = json.loads(json_str)
+            else:
+                parsed_data = json.loads(response_text)
+            
+            # Validate structure
+            if "clauses" not in parsed_data:
+                raise ValueError("Missing 'clauses' in response")
+            
+            # Ensure clauses have proper structure
+            clauses = []
+            for i, clause in enumerate(parsed_data.get("clauses", [])):
+                clauses.append({
+                    "number": clause.get("number", i + 1),
+                    "title": clause.get("title", f"ข้อ {i + 1}"),
+                    "content": clause.get("content", "")
+                })
+            
+            parsed_data["clauses"] = clauses
+            
+            return {
+                "success": True,
+                "data": parsed_data,
+                "message": f"Successfully extracted {len(clauses)} clauses from contract"
+            }
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse AI response: {e}")
+            return {
+                "success": False,
+                "data": {},
+                "message": "AI returned invalid format. Please try again or adjust the prompt."
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"AI extraction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"AI extraction failed: {str(e)}")
+
+
+@router.get("/ai-extraction/prompt")
+def get_default_extraction_prompt(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Get the default AI extraction prompt for reference"""
+    return {
+        "success": True,
+        "data": {
+            "default_prompt": DEFAULT_TEMPLATE_EXTRACTION_PROMPT,
+            "description": "คุณสามารถปรับแต่ง prompt นี้ได้ตามต้องการ เพื่อให้ AI ถอดความตามรูปแบบที่คุณต้องการ"
+        }
+    }
+
+
+@router.post("/ai-extraction/test-prompt")
+async def test_extraction_prompt(
+    request: AIExtractRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Test a custom extraction prompt with sample data"""
+    try:
+        sample_contract = """
+        สัญญาจัดซื้ออุปกรณ์คอมพิวเตอร์
+        
+        ข้อ 1 คำนิยาม
+        สัญญาฉบับนี้ทำขึ้นระหว่างหน่วยงานราชการกับผู้ขาย
+        
+        ข้อ 2 วัตถุประสงค์
+        ผู้ขายตกลงจัดส่งอุปกรณ์ตามรายการที่ระบุ
+        
+        ข้อ 3 การรับประกัน
+        รับประกัน 1 ปี นับจากวันส่งมอบ
+        """
+        
+        prompt = request.custom_prompt or DEFAULT_TEMPLATE_EXTRACTION_PROMPT
+        full_prompt = f"{prompt}\n\nตัวอย่างเอกสาร:\n{sample_contract}"
+        
+        llm_service = LLMService()
+        ai_response = await llm_service.generate(
+            prompt=full_prompt,
+            model="typhoon",
+            temperature=0.3,
+            max_tokens=2000
+        )
+        
+        return {
+            "success": True,
+            "data": {
+                "prompt_used": prompt,
+                "ai_response": ai_response.get("text", ""),
+                "note": "นี่คือตัวอย่างผลลัพธ์จาก prompt ของคุณ"
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prompt test failed: {str(e)}")

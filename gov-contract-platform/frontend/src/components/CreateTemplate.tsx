@@ -1,9 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { 
   Plus, Trash2, GripVertical, ChevronUp, ChevronDown,
-  FileText, Save, X, AlertCircle, CheckCircle
+  FileText, Save, X, AlertCircle, CheckCircle, 
+  Upload, Sparkles, Settings, FileUp, Loader2, Wand2
 } from 'lucide-react'
-import { createTemplate, getTemplateTypes } from '../services/templateService'
+import { 
+  createTemplate, 
+  getTemplateTypes, 
+  extractTemplateFromFile,
+  getDefaultExtractionPrompt,
+  testExtractionPrompt 
+} from '../services/templateService'
 
 interface CreateTemplateProps {
   onClose: () => void
@@ -31,8 +38,19 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
     { id: '1', number: 1, title: '', content: '' }
   ])
   
+  // AI Extraction state
+  const [showAIImport, setShowAIImport] = useState(false)
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [extracting, setExtracting] = useState(false)
+  const [customPrompt, setCustomPrompt] = useState('')
+  const [showPromptSettings, setShowPromptSettings] = useState(false)
+  const [defaultPrompt, setDefaultPrompt] = useState('')
+  const [testingPrompt, setTestingPrompt] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
   useEffect(() => {
     loadTemplateTypes()
+    loadDefaultPrompt()
   }, [])
   
   const loadTemplateTypes = async () => {
@@ -44,7 +62,6 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
       }
     } catch (err) {
       console.error('Failed to load template types:', err)
-      // Set default types if API fails
       setTemplateTypes([
         { value: 'procurement', label: 'จัดซื้อจัดจ้าง' },
         { value: 'construction', label: 'ก่อสร้าง' },
@@ -54,6 +71,108 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
         { value: 'software', label: 'ไอที/ซอฟต์แวร์' }
       ])
       setType('procurement')
+    }
+  }
+  
+  const loadDefaultPrompt = async () => {
+    try {
+      const result = await getDefaultExtractionPrompt()
+      if (result.success) {
+        setDefaultPrompt(result.data.default_prompt)
+      }
+    } catch (err) {
+      console.error('Failed to load default prompt:', err)
+    }
+  }
+  
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      const allowedTypes = [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'image/jpeg',
+        'image/png',
+        'image/tiff'
+      ]
+      if (allowedTypes.includes(file.type) || file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+        setUploadedFile(file)
+        setError(null)
+      } else {
+        setError('รองรับไฟล์ PDF, DOCX, JPG, PNG เท่านั้น')
+      }
+    }
+  }
+  
+  const handleAIExtract = async () => {
+    if (!uploadedFile) {
+      setError('กรุณาเลือกไฟล์ก่อน')
+      return
+    }
+    
+    setExtracting(true)
+    setError(null)
+    
+    try {
+      const result = await extractTemplateFromFile(
+        uploadedFile, 
+        customPrompt.trim() || undefined
+      )
+      
+      if (result.success && result.data) {
+        // Populate form with extracted data
+        setName(result.data.template_name || '')
+        setDescription(result.data.description || '')
+        
+        // Try to match template type
+        const matchedType = templateTypes.find(t => 
+          result.data.template_type?.toLowerCase().includes(t.label.toLowerCase())
+        )
+        if (matchedType) {
+          setType(matchedType.value)
+        }
+        
+        // Populate clauses
+        if (result.data.clauses && result.data.clauses.length > 0) {
+          const newClauses = result.data.clauses.map((c, idx) => ({
+            id: `ai-${idx}`,
+            number: c.number || idx + 1,
+            title: c.title || '',
+            content: c.content || ''
+          }))
+          setClauses(newClauses)
+        }
+        
+        // Close AI import section
+        setShowAIImport(false)
+        setUploadedFile(null)
+      } else {
+        setError(result.message || 'ไม่สามารถถอดความจากไฟล์ได้')
+      }
+    } catch (err: any) {
+      console.error('AI extraction failed:', err)
+      setError(err.response?.data?.detail || 'การถอดความด้วย AI ล้มเหลว')
+    } finally {
+      setExtracting(false)
+    }
+  }
+  
+  const handleTestPrompt = async () => {
+    if (!customPrompt.trim()) {
+      setError('กรุณาระบุ Prompt ก่อนทดสอบ')
+      return
+    }
+    
+    setTestingPrompt(true)
+    try {
+      const result = await testExtractionPrompt(customPrompt)
+      if (result.success) {
+        alert(`ผลการทดสอบ Prompt:\n\n${result.data.ai_response.substring(0, 500)}...`)
+      }
+    } catch (err) {
+      setError('การทดสอบ Prompt ล้มเหลว')
+    } finally {
+      setTestingPrompt(false)
     }
   }
   
@@ -73,7 +192,6 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
       return
     }
     const updated = clauses.filter(c => c.id !== id)
-    // Renumber clauses
     const renumbered = updated.map((c, idx) => ({
       ...c,
       number: idx + 1
@@ -98,12 +216,10 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
     const newClauses = [...clauses]
     const targetIndex = direction === 'up' ? index - 1 : index + 1
     
-    // Swap using temp variable (avoid JSX parsing issue)
     const temp = newClauses[index]
     newClauses[index] = newClauses[targetIndex]
     newClauses[targetIndex] = temp
     
-    // Renumber
     const renumbered = newClauses.map((c, idx) => ({
       ...c,
       number: idx + 1
@@ -122,7 +238,6 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
       return false
     }
     
-    // Check if all clauses have title
     const emptyClauses = clauses.filter(c => !c.title.trim())
     if (emptyClauses.length > 0) {
       setError(`ข้อที่ ${emptyClauses[0].number} ยังไม่มีหัวข้อ`)
@@ -189,6 +304,151 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
               <span>{error}</span>
             </div>
           )}
+          
+          {/* AI Import Section */}
+          <div className="mb-6">
+            {!showAIImport ? (
+              <button
+                onClick={() => setShowAIImport(true)}
+                className="w-full p-4 border-2 border-dashed border-purple-300 rounded-lg bg-purple-50 hover:bg-purple-100 hover:border-purple-400 transition flex items-center justify-center gap-3"
+              >
+                <div className="p-2 bg-purple-200 rounded-lg">
+                  <Sparkles className="w-5 h-5 text-purple-700" />
+                </div>
+                <div className="text-left">
+                  <p className="font-medium text-purple-900">นำเข้าด้วย AI</p>
+                  <p className="text-sm text-purple-700">อัปโหลดไฟล์สัญญาและให้ AI ช่วยถอดความเป็น Template</p>
+                </div>
+              </button>
+            ) : (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Wand2 className="w-5 h-5 text-purple-600" />
+                    <h3 className="font-medium text-purple-900">นำเข้าด้วย AI</h3>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowAIImport(false)
+                      setUploadedFile(null)
+                      setCustomPrompt('')
+                    }}
+                    className="text-sm text-purple-600 hover:text-purple-800"
+                  >
+                    ปิด
+                  </button>
+                </div>
+                
+                {/* File Upload */}
+                <div className="mb-4">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.tiff"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                  
+                  {!uploadedFile ? (
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full p-6 border-2 border-dashed border-gray-300 rounded-lg bg-white hover:border-purple-400 hover:bg-purple-50 transition flex flex-col items-center gap-2"
+                    >
+                      <FileUp className="w-8 h-8 text-gray-400" />
+                      <span className="text-gray-600">คลิกเพื่อเลือกไฟล์</span>
+                      <span className="text-sm text-gray-400">รองรับ PDF, DOCX, JPG, PNG</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center justify-between p-3 bg-white rounded-lg border">
+                      <div className="flex items-center gap-3">
+                        <FileText className="w-8 h-8 text-purple-600" />
+                        <div>
+                          <p className="font-medium text-gray-900">{uploadedFile.name}</p>
+                          <p className="text-sm text-gray-500">{(uploadedFile.size / 1024).toFixed(1)} KB</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setUploadedFile(null)}
+                        className="p-2 hover:bg-red-100 rounded-lg text-red-500"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Prompt Settings Toggle */}
+                <div className="mb-4">
+                  <button
+                    onClick={() => setShowPromptSettings(!showPromptSettings)}
+                    className="flex items-center gap-2 text-sm text-purple-700 hover:text-purple-900"
+                  >
+                    <Settings className="w-4 h-4" />
+                    {showPromptSettings ? 'ซ่อนการตั้งค่า Prompt' : 'ตั้งค่า Prompt สำหรับถอดความ'}
+                  </button>
+                </div>
+                
+                {/* Custom Prompt */}
+                {showPromptSettings && (
+                  <div className="mb-4 p-3 bg-white rounded-lg border">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Prompt สำหรับถอดความ (可选)
+                    </label>
+                    <textarea
+                      value={customPrompt}
+                      onChange={(e) => setCustomPrompt(e.target.value)}
+                      placeholder={defaultPrompt.substring(0, 200) + '...'}
+                      rows={6}
+                      className="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-purple-500"
+                    />
+                    <div className="flex items-center justify-between mt-2">
+                      <button
+                        onClick={() => setCustomPrompt(defaultPrompt)}
+                        className="text-xs text-purple-600 hover:text-purple-800"
+                      >
+                        ใช้ Default Prompt
+                      </button>
+                      <button
+                        onClick={handleTestPrompt}
+                        disabled={testingPrompt || !customPrompt.trim()}
+                        className="text-xs flex items-center gap-1 px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50"
+                      >
+                        {testingPrompt ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3 h-3" />
+                        )}
+                        ทดสอบ Prompt
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Extract Button */}
+                <button
+                  onClick={handleAIExtract}
+                  disabled={!uploadedFile || extracting}
+                  className="w-full py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2 transition"
+                >
+                  {extracting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      AI กำลังถอดความ...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-5 h-5" />
+                      ถอดความด้วย AI
+                    </>
+                  )}
+                </button>
+                
+                <p className="mt-3 text-xs text-gray-500 text-center">
+                  AI จะวิเคราะห์เอกสารและสร้าง Template โดยอัตโนมัติ คุณสามารถแก้ไขได้ภายหลัง
+                </p>
+              </div>
+            )}
+          </div>
           
           <div className="space-y-6">
             {/* Basic Info */}

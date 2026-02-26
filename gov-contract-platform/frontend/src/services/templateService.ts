@@ -33,6 +33,13 @@ export interface TemplateClause {
   content: string
 }
 
+export interface AIExtractResult {
+  template_name: string
+  template_type: string
+  description: string
+  clauses: TemplateClause[]
+}
+
 export const getTemplates = async (): Promise<Template[]> => {
   const response = await api.get('/templates')
   return response.data.data
@@ -71,4 +78,40 @@ export const useTemplate = async (id: string) => {
 export const getTemplateTypes = async () => {
   const response = await api.get('/templates/types/list')
   return response.data.data
+}
+
+// AI Extraction API
+export const extractTemplateFromFile = async (
+  file: File,
+  customPrompt?: string
+): Promise<{ success: boolean; data: AIExtractResult; message?: string }> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (customPrompt) {
+    formData.append('custom_prompt', customPrompt)
+  }
+
+  const response = await api.post('/templates/ai-extract', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+  return response.data
+}
+
+export const getDefaultExtractionPrompt = async (): Promise<{ 
+  success: boolean; 
+  data: { default_prompt: string; description: string } 
+}> => {
+  const response = await api.get('/templates/ai-extraction/prompt')
+  return response.data
+}
+
+export const testExtractionPrompt = async (
+  customPrompt: string
+): Promise<{ success: boolean; data: { prompt_used: string; ai_response: string; note: string } }> => {
+  const response = await api.post('/templates/ai-extraction/test-prompt', {
+    custom_prompt: customPrompt
+  })
+  return response.data
 }
