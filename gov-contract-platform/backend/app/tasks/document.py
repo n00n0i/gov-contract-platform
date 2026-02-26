@@ -33,12 +33,18 @@ def process_document_ocr(self, document_id: str, tenant_id: str = None) -> Dict[
         
         if result.success:
             logger.info(f"[OCR Task] Completed for document {document_id}")
+            
+            # Queue GraphRAG extraction after OCR completes
+            logger.info(f"[OCR Task] Queueing GraphRAG extraction for document {document_id}")
+            process_graphrag_extraction.delay(document_id, tenant_id)
+            
             return {
                 "status": "success",
                 "document_id": document_id,
                 "confidence": result.confidence,
                 "pages": result.pages,
-                "text_length": len(result.text) if result.text else 0
+                "text_length": len(result.text) if result.text else 0,
+                "graphrag_queued": True
             }
         else:
             logger.error(f"[OCR Task] Failed for document {document_id}: {result.error_message}")
@@ -100,6 +106,134 @@ def process_contract_extraction(self, document_id: str, tenant_id: str = None) -
         
     except Exception as exc:
         logger.error(f"[AI Task] Exception: {exc}")
+        raise self.retry(exc=exc)
+    finally:
+        db.close()
+
+
+@shared_task(bind=True, max_retries=2)
+def process_graphrag_extraction(self, document_id: str, tenant_id: str = None) -> Dict[str, Any]:
+    """
+    Extract entities and relationships from document using GraphRAG
+    
+    This runs after OCR is complete and creates:
+    - Entities: persons, organizations, dates, values, terms
+    - Relationships: connections between entities
+    - Document node linking to MinIO file
+    
+    Flow:
+    1. Get document with extracted_text from DB
+    2. Download file from MinIO (for additional context)
+    3. Extract entities using LLM
+    4. Create relationships
+    5. Link document node to MinIO storage_path
+    """
+    logger.info(f"[GraphRAG Task] Starting extraction for document {document_id}")
+    
+    db = SessionLocal()
+    try:
+        from app.models.contract import ContractAttachment
+        
+        document = db.query(ContractAttachment).filter(
+            ContractAttachment.id == document_id
+        ).first()
+        
+        if not document or not document.extracted_text:
+            return {
+                "status": "skipped",
+                "reason": "No OCR text available for GraphRAG"
+            }
+        
+        # Get MinIO file info for linking
+        storage = get_storage_service()
+        minio_path = document.storage_path
+        minio_bucket = document.storage_bucket
+        
+        # Generate presigned URL for LLM reference (optional)
+        try:
+            file_url = storage.get_presigned_url(minio_path, expires=3600)
+        except Exception as e:
+            logger.warning(f"Could not generate presigned URL: {e}")
+            file_url = None
+        
+        # TODO: Implement GraphRAG extraction
+        # This should:
+        # 1. Use LLM to extract entities from extracted_text
+        # 2. Create nodes in Neo4j: Document, Person, Organization, Date, Value, etc.
+        # 3. Create relationships: MENTIONS, SIGNS, CONTAINS, etc.
+        # 4. Link Document node to MinIO storage_path for retrieval
+        
+        entities = []
+        relationships = []
+        
+        # Example entity extraction (to be implemented with LLM)
+        if document.extracted_contract_number:
+            entities.append({
+                "type": "CONTRACT_NUMBER",
+                "value": document.extracted_contract_number,
+                "source": "ocr"
+            })
+        
+        if document.extracted_contract_value:
+            entities.append({
+                "type": "MONETARY_VALUE",
+                "value": str(document.extracted_contract_value),
+                "currency": "THB",
+                "source": "ocr"
+            })
+        
+        # Store parties as entities
+        if document.extracted_parties:
+            for party in document.extracted_parties:
+                entities.append({
+                    "type": "ORGANIZATION" if party.get("type") == "company" else "PERSON",
+                    "name": party.get("name"),
+                    "role": party.get("role", "unknown"),
+                    "source": "ocr"
+                })
+                relationships.append({
+                    "from": party.get("name"),
+                    "to": document.extracted_contract_number or document_id,
+                    "type": "PARTY_TO"
+                })
+        
+        # Create document node with MinIO link
+        document_node = {
+            "id": f"DOC_{document_id}",
+            "type": "DOCUMENT",
+            "labels": ["ContractDocument", document.document_type or "unknown"],
+            "properties": {
+                "document_id": document_id,
+                "filename": document.original_filename,
+                "mime_type": document.mime_type,
+                "minio_path": minio_path,
+                "minio_bucket": minio_bucket,
+                "minio_url": file_url,
+                "contract_id": document.contract_id,
+                "page_count": document.page_count,
+                "uploaded_at": document.uploaded_at.isoformat() if document.uploaded_at else None,
+                "ocr_confidence": float(document.ocr_confidence) if document.ocr_confidence else None
+            }
+        }
+        
+        logger.info(f"[GraphRAG Task] Extracted {len(entities)} entities, {len(relationships)} relationships for document {document_id}")
+        
+        # TODO: Save to Neo4j
+        # await save_to_graph(document_node, entities, relationships)
+        
+        return {
+            "status": "success",
+            "document_id": document_id,
+            "entities_extracted": len(entities),
+            "relationships_extracted": len(relationships),
+            "document_node": document_node,
+            "minio_path": minio_path,
+            "entities": entities,
+            "relationships": relationships
+        }
+        
+    except Exception as exc:
+        logger.error(f"[GraphRAG Task] Exception for document {document_id}: {exc}")
         raise self.retry(exc=exc)
     finally:
         db.close()

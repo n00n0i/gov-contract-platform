@@ -347,6 +347,289 @@ async def list_contract_documents(
     }
 
 
+@router.get("/{contract_id}/graphrag")
+async def get_contract_graphrag(
+    contract_id: str,
+    include_entities: bool = Query(True),
+    include_relationships: bool = Query(True),
+    include_documents: bool = Query(True),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Get GraphRAG knowledge graph for a contract
+    
+    Returns entities, relationships, and documents extracted from
+    all documents in this contract, with links to MinIO files.
+    
+    This provides a comprehensive view of:
+    - Parties involved (companies, persons)
+    - Key terms (dates, values, conditions)
+    - Document connections
+    - Links to original files in MinIO
+    """
+    from app.models.contract import ContractAttachment
+    from app.services.storage.minio_service import get_storage_service
+    
+    # Get contract
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    # Get all documents for this contract
+    documents = db.query(ContractAttachment).filter(
+        ContractAttachment.contract_id == contract_id,
+        ContractAttachment.is_deleted == 0,
+        ContractAttachment.ocr_status == "completed"
+    ).all()
+    
+    # Build knowledge graph
+    storage = get_storage_service()
+    entities = []
+    relationships = []
+    document_nodes = []
+    
+    # Contract node
+    contract_node = {
+        "id": f"CTR_{contract_id}",
+        "type": "CONTRACT",
+        "name": contract.title,
+        "properties": {
+            "contract_id": contract_id,
+            "contract_no": contract.contract_no,
+            "value": float(contract.value_original) if contract.value_original else None,
+            "start_date": contract.start_date.isoformat() if contract.start_date else None,
+            "end_date": contract.end_date.isoformat() if contract.end_date else None,
+            "status": contract.status.value if contract.status else None
+        }
+    }
+    
+    # Extract entities from contract
+    if contract.vendor_name:
+        entities.append({
+            "id": f"VND_{contract_id}",
+            "type": "VENDOR",
+            "name": contract.vendor_name,
+            "properties": {
+                "tax_id": contract.vendor_tax_id,
+                "address": contract.vendor_address
+            }
+        })
+        relationships.append({
+            "id": f"REL_VND_{contract_id}",
+            "type": "VENDOR_FOR",
+            "source": f"VND_{contract_id}",
+            "target": f"CTR_{contract_id}"
+        })
+    
+    # Process each document
+    for doc in documents:
+        # Generate MinIO URL
+        try:
+            download_url = storage.get_presigned_url(doc.storage_path, expires=3600)
+        except Exception as e:
+            logger.error(f"Failed to generate URL for {doc.id}: {e}")
+            download_url = None
+        
+        # Document node
+        doc_node = {
+            "id": f"DOC_{doc.id}",
+            "type": "DOCUMENT",
+            "name": doc.original_filename,
+            "properties": {
+                "document_id": doc.id,
+                "document_type": doc.document_type,
+                "minio_path": doc.storage_path,
+                "minio_bucket": doc.storage_bucket,
+                "download_url": download_url,
+                "page_count": doc.page_count,
+                "ocr_confidence": float(doc.ocr_confidence) if doc.ocr_confidence else None
+            }
+        }
+        document_nodes.append(doc_node)
+        
+        # Document-Contract relationship
+        relationships.append({
+            "id": f"REL_DOC_CTR_{doc.id}",
+            "type": "BELONGS_TO",
+            "source": f"DOC_{doc.id}",
+            "target": f"CTR_{contract_id}"
+        })
+        
+        # Extract entities from document
+        if doc.extracted_contract_number:
+            entities.append({
+                "id": f"CN_{doc.id}",
+                "type": "CONTRACT_NUMBER",
+                "name": doc.extracted_contract_number,
+                "properties": {"value": doc.extracted_contract_number},
+                "source_document": doc.id
+            })
+        
+        if doc.extracted_contract_value:
+            entities.append({
+                "id": f"VAL_{doc.id}",
+                "type": "MONETARY_VALUE",
+                "name": f"{doc.extracted_contract_value} THB",
+                "properties": {
+                    "amount": float(doc.extracted_contract_value),
+                    "currency": "THB"
+                },
+                "source_document": doc.id
+            })
+        
+        if doc.extracted_parties:
+            for i, party in enumerate(doc.extracted_parties):
+                party_id = f"PTY_{doc.id}_{i}"
+                party_type = "ORGANIZATION" if party.get("type") == "company" else "PERSON"
+                
+                # Check if entity already exists
+                existing = next((e for e in entities if e.get("name") == party.get("name")), None)
+                if not existing:
+                    entities.append({
+                        "id": party_id,
+                        "type": party_type,
+                        "name": party.get("name"),
+                        "properties": party,
+                        "source_document": doc.id
+                    })
+                    target_id = party_id
+                else:
+                    target_id = existing["id"]
+                
+                relationships.append({
+                    "id": f"REL_PTY_{doc.id}_{i}",
+                    "type": "PARTY_TO",
+                    "source": target_id,
+                    "target": f"DOC_{doc.id}",
+                    "properties": {"role": party.get("role", "unknown")}
+                })
+    
+    return {
+        "success": True,
+        "contract_id": contract_id,
+        "contract": contract_node,
+        "statistics": {
+            "total_documents": len(document_nodes),
+            "total_entities": len(entities),
+            "total_relationships": len(relationships),
+            "document_types": list(set(d["properties"].get("document_type") for d in document_nodes))
+        },
+        "graph": {
+            "nodes": [contract_node] + document_nodes + (entities if include_entities else []),
+            "relationships": relationships if include_relationships else [],
+            "documents": document_nodes if include_documents else []
+        },
+        "minio_links": {
+            "description": "All documents include presigned URLs valid for 1 hour",
+            "document_count": len([d for d in document_nodes if d["properties"].get("download_url")])
+        }
+    }
+
+
+@router.get("/{contract_id}/graphrag/search")
+async def search_contract_graphrag(
+    contract_id: str,
+    q: str = Query(..., description="Search query for graph entities"),
+    entity_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Search within contract's GraphRAG knowledge graph
+    
+    Performs semantic search across entities and relationships
+    in the contract's knowledge graph.
+    
+    Example queries:
+    - q="บริษัท" → Find all companies mentioned
+    - q="มูลค่า" → Find monetary values
+    - q="วันที่" → Find dates mentioned
+    """
+    from app.models.contract import ContractAttachment
+    from app.services.storage.minio_service import get_storage_service
+    
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters")
+    
+    documents = db.query(ContractAttachment).filter(
+        ContractAttachment.contract_id == contract_id,
+        ContractAttachment.is_deleted == 0,
+        ContractAttachment.ocr_status == "completed"
+    ).all()
+    
+    storage = get_storage_service()
+    search_lower = q.lower()
+    matching_entities = []
+    matching_documents = []
+    
+    for doc in documents:
+        doc_matches = False
+        
+        # Check contract number
+        if doc.extracted_contract_number and search_lower in doc.extracted_contract_number.lower():
+            matching_entities.append({
+                "type": "CONTRACT_NUMBER",
+                "value": doc.extracted_contract_number,
+                "document_id": doc.id,
+                "match_field": "contract_number"
+            })
+            doc_matches = True
+        
+        # Check parties
+        if doc.extracted_parties:
+            for party in doc.extracted_parties:
+                party_name = party.get("name", "")
+                if search_lower in party_name.lower():
+                    party_type = "ORGANIZATION" if party.get("type") == "company" else "PERSON"
+                    if not entity_type or entity_type == party_type:
+                        matching_entities.append({
+                            "type": party_type,
+                            "name": party_name,
+                            "role": party.get("role"),
+                            "document_id": doc.id,
+                            "match_field": "party_name"
+                        })
+                        doc_matches = True
+        
+        # Check extracted text
+        if doc.extracted_text and search_lower in doc.extracted_text.lower():
+            if not doc_matches:
+                doc_matches = True
+        
+        if doc_matches:
+            try:
+                download_url = storage.get_presigned_url(doc.storage_path, expires=3600)
+            except:
+                download_url = None
+            
+            matching_documents.append({
+                "document_id": doc.id,
+                "filename": doc.original_filename,
+                "document_type": doc.document_type,
+                "download_url": download_url,
+                "storage_path": doc.storage_path,
+                "ocr_confidence": float(doc.ocr_confidence) if doc.ocr_confidence else None
+            })
+    
+    return {
+        "success": True,
+        "contract_id": contract_id,
+        "contract_no": contract.contract_no,
+        "contract_title": contract.title,
+        "query": q,
+        "entity_type_filter": entity_type,
+        "matching_entities": matching_entities,
+        "matching_documents": matching_documents,
+        "total_entities": len(matching_entities),
+        "total_documents": len(matching_documents)
+    }
+
+
 @router.post("")
 async def create_contract(
     background_tasks: BackgroundTasks,

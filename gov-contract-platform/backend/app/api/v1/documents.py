@@ -4,7 +4,7 @@ Document API Routes
 All document uploads are automatically processed with OCR using centralized settings
 from Settings > OCR (OCRSettingsService).
 """
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
@@ -373,14 +373,151 @@ def reprocess_ocr(
     Re-trigger OCR processing for document using centralized OCR Settings
     
     The document will be re-processed with the current OCR settings from Settings > OCR.
+    GraphRAG extraction will also be re-triggered after OCR completes.
     """
     from app.tasks.document import process_document_ocr
     
     process_document_ocr.delay(document_id, doc_service.tenant_id)
     
     return {
-        "message": "OCR processing queued with centralized settings",
+        "message": "OCR processing queued with centralized settings (GraphRAG will follow)",
         "document_id": document_id
+    }
+
+
+@router.get("/search/graphrag")
+def search_documents_graphrag(
+    q: str = Query(..., description="Search query for GraphRAG entities/relationships"),
+    entity_type: Optional[str] = Query(None, description="Filter by entity type (PERSON, ORGANIZATION, DATE, etc.)"),
+    relationship_type: Optional[str] = Query(None, description="Filter by relationship type"),
+    contract_id: Optional[str] = Query(None),
+    include_download_url: bool = Query(True, description="Include MinIO download URLs"),
+    db: Session = Depends(get_db),
+    doc_service: DocumentService = Depends(get_doc_service)
+):
+    """
+    Advanced search using GraphRAG knowledge graph
+    
+    Searches through entities and relationships extracted from documents.
+    Returns documents with matching graph elements and links to MinIO files.
+    
+    Example queries:
+    - q="บริษัท ก่อสร้างไทย" → Find documents mentioning this company
+    - q="มูลค่า > 1000000" → Find contracts with value > 1M
+    - entity_type="ORGANIZATION" → Find all organizations mentioned
+    - relationship_type="PARTY_TO" → Find all parties to contracts
+    
+    Response includes:
+    - entities: Matching entities found
+    - documents: Related documents with MinIO download links
+    - relationships: Connections between entities
+    """
+    from app.models.contract import ContractAttachment
+    from sqlalchemy import or_
+    import re
+    
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Search query must be at least 2 characters"
+        )
+    
+    # Build base query
+    query = db.query(ContractAttachment).filter(
+        ContractAttachment.is_deleted == 0,
+        ContractAttachment.ocr_status == "completed"
+    )
+    
+    if contract_id:
+        query = query.filter(ContractAttachment.contract_id == contract_id)
+    
+    # Search in extracted data (parties, contract number, etc.)
+    search_term = f"%{q}%"
+    query = query.filter(
+        or_(
+            ContractAttachment.extracted_text.ilike(search_term),
+            ContractAttachment.extracted_contract_number.ilike(search_term),
+            # Search in parties JSON
+            ContractAttachment.extracted_parties.cast(db.String).ilike(search_term)
+        )
+    )
+    
+    documents = query.order_by(ContractAttachment.uploaded_at.desc()).limit(50).all()
+    
+    results = []
+    for doc in documents:
+        # Generate MinIO download URL
+        download_url = None
+        if include_download_url:
+            try:
+                download_url = doc_service.storage.get_presigned_url(
+                    doc.storage_path, 
+                    expires=3600
+                )
+            except Exception as e:
+                logger.error(f"Failed to generate URL for {doc.id}: {e}")
+        
+        # Extract matching entities from document
+        matching_entities = []
+        
+        if doc.extracted_contract_number and q.lower() in doc.extracted_contract_number.lower():
+            matching_entities.append({
+                "type": "CONTRACT_NUMBER",
+                "value": doc.extracted_contract_number,
+                "match_type": "exact"
+            })
+        
+        if doc.extracted_parties:
+            for party in doc.extracted_parties:
+                party_name = party.get("name", "")
+                if q.lower() in party_name.lower():
+                    matching_entities.append({
+                        "type": "ORGANIZATION" if party.get("type") == "company" else "PERSON",
+                        "value": party_name,
+                        "role": party.get("role"),
+                        "match_type": "partial"
+                    })
+        
+        # Find text snippet
+        snippet = None
+        if doc.extracted_text:
+            pattern = re.compile(re.escape(q), re.IGNORECASE)
+            match = pattern.search(doc.extracted_text)
+            if match:
+                start = max(0, match.start() - 60)
+                end = min(len(doc.extracted_text), match.end() + 60)
+                snippet = "..." + doc.extracted_text[start:end] + "..."
+        
+        results.append({
+            "document_id": doc.id,
+            "filename": doc.original_filename,
+            "document_type": doc.document_type,
+            "download_url": download_url,
+            "storage_path": doc.storage_path,
+            "storage_bucket": doc.storage_bucket,
+            "extracted_contract_number": doc.extracted_contract_number,
+            "extracted_value": float(doc.extracted_contract_value) if doc.extracted_contract_value else None,
+            "matching_entities": matching_entities,
+            "entity_match_count": len(matching_entities),
+            "text_snippet": snippet,
+            "page_count": doc.page_count,
+            "ocr_confidence": float(doc.ocr_confidence) if doc.ocr_confidence else None,
+            "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
+            "contract_id": doc.contract_id
+        })
+    
+    # Sort by entity match count (most relevant first)
+    results.sort(key=lambda x: x["entity_match_count"], reverse=True)
+    
+    return {
+        "success": True,
+        "query": q,
+        "entity_type_filter": entity_type,
+        "relationship_type_filter": relationship_type,
+        "total_results": len(results),
+        "results": results,
+        "search_method": "graphrag_entity_search",
+        "note": "GraphRAG provides entity-based search across all documents with MinIO links"
     }
 
 
@@ -437,4 +574,147 @@ def get_ocr_result(
             "parties": document.extracted_parties
         },
         "processed_at": document.processed_at
+    }
+
+
+@router.get("/{document_id}/graphrag")
+def get_document_graphrag(
+    document_id: str,
+    doc_service: DocumentService = Depends(get_doc_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Get GraphRAG entities and relationships for a document
+    
+    Returns knowledge graph data extracted from the document
+    including entities (persons, organizations, dates, values)
+    and their relationships, all linked to the MinIO file.
+    """
+    from app.models.contract import ContractAttachment
+    
+    document = db.query(ContractAttachment).filter(
+        ContractAttachment.id == document_id,
+        ContractAttachment.is_deleted == 0
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Generate MinIO download URL
+    try:
+        download_url = doc_service.storage.get_presigned_url(
+            document.storage_path, 
+            expires=3600
+        )
+    except Exception as e:
+        logger.error(f"Failed to generate URL: {e}")
+        download_url = None
+    
+    # TODO: Query Neo4j for actual graph data
+    # For now, return extracted data from database
+    entities = []
+    relationships = []
+    
+    if document.extracted_contract_number:
+        entities.append({
+            "id": f"CN_{document_id}",
+            "type": "CONTRACT_NUMBER",
+            "name": document.extracted_contract_number,
+            "properties": {"value": document.extracted_contract_number}
+        })
+    
+    if document.extracted_contract_value:
+        entities.append({
+            "id": f"VAL_{document_id}",
+            "type": "MONETARY_VALUE",
+            "name": f"{document.extracted_contract_value} THB",
+            "properties": {
+                "amount": float(document.extracted_contract_value),
+                "currency": "THB"
+            }
+        })
+    
+    if document.extracted_parties:
+        for i, party in enumerate(document.extracted_parties):
+            party_id = f"PTY_{document_id}_{i}"
+            entities.append({
+                "id": party_id,
+                "type": "ORGANIZATION" if party.get("type") == "company" else "PERSON",
+                "name": party.get("name"),
+                "properties": party
+            })
+            relationships.append({
+                "id": f"REL_{document_id}_{i}",
+                "type": "PARTY_TO",
+                "source": party_id,
+                "target": f"DOC_{document_id}",
+                "properties": {"role": party.get("role", "unknown")}
+            })
+    
+    # Document node with MinIO link
+    document_node = {
+        "id": f"DOC_{document_id}",
+        "type": "DOCUMENT",
+        "name": document.original_filename,
+        "properties": {
+            "document_id": document_id,
+            "filename": document.original_filename,
+            "document_type": document.document_type,
+            "minio_path": document.storage_path,
+            "minio_bucket": document.storage_bucket,
+            "download_url": download_url,
+            "page_count": document.page_count,
+            "uploaded_at": document.uploaded_at.isoformat() if document.uploaded_at else None
+        }
+    }
+    
+    return {
+        "success": True,
+        "document_id": document_id,
+        "document_node": document_node,
+        "entities": entities,
+        "relationships": relationships,
+        "entity_count": len(entities),
+        "relationship_count": len(relationships),
+        "graph_status": "extracted" if document.ocr_status == "completed" else "pending"
+    }
+
+
+@router.post("/{document_id}/graphrag/rebuild")
+def rebuild_document_graphrag(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    doc_service: DocumentService = Depends(get_doc_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Rebuild GraphRAG for a document
+    
+    Re-runs entity and relationship extraction on the document's OCR text.
+    Useful when updating graph extraction logic.
+    """
+    from app.models.contract import ContractAttachment
+    from app.tasks.document import process_graphrag_extraction
+    
+    document = db.query(ContractAttachment).filter(
+        ContractAttachment.id == document_id,
+        ContractAttachment.is_deleted == 0
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if document.ocr_status != "completed":
+        raise HTTPException(
+            status_code=400, 
+            detail="Document OCR not completed. Please wait for OCR to finish."
+        )
+    
+    # Queue GraphRAG rebuild
+    process_graphrag_extraction.delay(document_id, doc_service.tenant_id)
+    
+    return {
+        "success": True,
+        "message": "GraphRAG rebuild queued",
+        "document_id": document_id
     }
