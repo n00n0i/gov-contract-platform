@@ -79,7 +79,7 @@ export default function NavigationHeader({
               <ChevronRight className="w-4 h-4" />
               {crumb.path ? (
                 <button
-                  onClick={() => navigate(crumb.path)}
+                  onClick={() => crumb.path && navigate(crumb.path)}
                   className="hover:text-blue-600 transition"
                 >
                   {crumb.label}

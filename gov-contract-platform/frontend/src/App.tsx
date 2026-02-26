@@ -3,6 +3,8 @@ import axios from 'axios'
 import DocumentUpload from './pages/DocumentUpload'
 import Contracts from './pages/Contracts'
 import Vendors from './pages/Vendors'
+import CreateVendor from './pages/CreateVendor'
+import VendorDetail from './pages/VendorDetail'
 import Login, { logout } from './pages/Login'
 import Profile from './pages/Profile'
 import Settings from './pages/Settings'
@@ -52,6 +54,21 @@ function App() {
         <Route path="/vendors" element={
           <ProtectedRoute>
             <Vendors />
+          </ProtectedRoute>
+        } />
+        <Route path="/vendors/new" element={
+          <ProtectedRoute>
+            <CreateVendor />
+          </ProtectedRoute>
+        } />
+        <Route path="/vendors/:id" element={
+          <ProtectedRoute>
+            <VendorDetail />
+          </ProtectedRoute>
+        } />
+        <Route path="/vendors/:id/edit" element={
+          <ProtectedRoute>
+            <CreateVendor />
           </ProtectedRoute>
         } />
         <Route path="/profile" element={
