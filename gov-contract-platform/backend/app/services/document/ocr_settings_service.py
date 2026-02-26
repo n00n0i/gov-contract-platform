@@ -33,7 +33,7 @@ class OCRSettingsService:
         "confidence_threshold": 80,
         # Typhoon OCR settings
         "typhoon_url": "https://api.opentyphoon.ai/v1/ocr",
-        "typhoon_key": "",
+        "typhoon_key": "sk-N0BWvEJ7sMUxQrE9k4JIRL9ehdGZZRy7fP3gPtnie8QkZ8Kg",
         "typhoon_model": "typhoon-ocr",
         "typhoon_task_type": "default",
         "typhoon_max_tokens": 16384,
