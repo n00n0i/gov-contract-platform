@@ -95,7 +95,7 @@ export default function Vendors() {
   const getStatusBadge = (status: string, isBlacklisted: boolean) => {
     if (isBlacklisted) {
       return { 
-        label: 'แบล็คลิสต์', 
+        label: 'แบล็คลิสต์ (ห้ามทำสัญญา)', 
         color: 'text-red-600', 
         bg: 'bg-red-100', 
         icon: Ban 
@@ -103,11 +103,11 @@ export default function Vendors() {
     }
     
     const configs: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-      active: { label: 'ใช้งาน', color: 'text-green-600', bg: 'bg-green-100', icon: CheckCircle },
-      inactive: { label: 'ไม่ใช้งาน', color: 'text-gray-600', bg: 'bg-gray-100', icon: XCircle },
-      blacklisted: { label: 'แบล็คลิสต์', color: 'text-red-600', bg: 'bg-red-100', icon: AlertTriangle },
-      suspended: { label: 'ระงับ', color: 'text-yellow-600', bg: 'bg-yellow-100', icon: AlertTriangle },
-      pending: { label: 'รอดำเนินการ', color: 'text-blue-600', bg: 'bg-blue-100', icon: Calendar }
+      active: { label: 'พร้อมใช้งาน', color: 'text-green-600', bg: 'bg-green-100', icon: CheckCircle },
+      inactive: { label: 'ไม่ใช้งาน (เลิกกิจการ/ไม่ต่อสัญญา)', color: 'text-gray-600', bg: 'bg-gray-100', icon: XCircle },
+      blacklisted: { label: 'แบล็คลิสต์ (ห้ามทำสัญญา)', color: 'text-red-600', bg: 'bg-red-100', icon: AlertTriangle },
+      suspended: { label: 'ระงับชั่วคราว (สอบสวน/ปรับปรุง)', color: 'text-yellow-600', bg: 'bg-yellow-100', icon: AlertTriangle },
+      pending: { label: 'รอตรวจสอบเอกสาร', color: 'text-blue-600', bg: 'bg-blue-100', icon: Calendar }
     }
     return configs[status] || configs.inactive
   }
@@ -118,7 +118,8 @@ export default function Vendors() {
       company: { label: 'นิติบุคคล', icon: Building2 },
       partnership: { label: 'ห้างหุ้นส่วน', icon: Building2 },
       cooperative: { label: 'สหกรณ์', icon: Building2 },
-      state_enterprise: { label: 'รัฐวิสาหกิจ', icon: Building2 }
+      state_enterprise: { label: 'รัฐวิสาหกิจ', icon: Building2 },
+      other: { label: 'อื่นๆ', icon: Building2 }
     }
     return types[type] || { label: type, icon: Building2 }
   }
@@ -202,9 +203,10 @@ export default function Vendors() {
               className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               <option value="all">สถานะทั้งหมด</option>
-              <option value="active">ใช้งาน</option>
+              <option value="active">พร้อมใช้งาน</option>
               <option value="inactive">ไม่ใช้งาน</option>
-              <option value="pending">รอดำเนินการ</option>
+              <option value="pending">รอตรวจสอบเอกสาร</option>
+              <option value="suspended">ระงับชั่วคราว</option>
               <option value="blacklisted">แบล็คลิสต์</option>
             </select>
 
@@ -219,6 +221,7 @@ export default function Vendors() {
               <option value="partnership">ห้างหุ้นส่วน</option>
               <option value="cooperative">สหกรณ์</option>
               <option value="state_enterprise">รัฐวิสาหกิจ</option>
+              <option value="other">อื่นๆ</option>
             </select>
           </div>
         </div>

@@ -22,6 +22,7 @@ class VendorType(str, enum.Enum):
     PARTNERSHIP = "partnership"
     COOPERATIVE = "cooperative"
     STATE_ENTERPRISE = "state_enterprise"
+    OTHER = "other"
 
 
 class Vendor(BaseModel):

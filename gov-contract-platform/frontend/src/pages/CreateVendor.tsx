@@ -198,6 +198,7 @@ export default function CreateVendor() {
                   <option value="partnership">ห้างหุ้นส่วน</option>
                   <option value="cooperative">สหกรณ์</option>
                   <option value="state_enterprise">รัฐวิสาหกิจ</option>
+                  <option value="other">อื่นๆ</option>
                 </select>
               </div>
 
@@ -210,9 +211,10 @@ export default function CreateVendor() {
                   onChange={(e) => handleChange('status', e.target.value)}
                   className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="active">ใช้งาน</option>
-                  <option value="inactive">ไม่ใช้งาน</option>
-                  <option value="pending">รอดำเนินการ</option>
+                  <option value="active">พร้อมใช้งาน</option>
+                  <option value="inactive">ไม่ใช้งาน (เลิกกิจการ/ไม่ต่อสัญญา)</option>
+                  <option value="pending">รอตรวจสอบเอกสาร</option>
+                  <option value="suspended">ระงับชั่วคราว (สอบสวน/ปรับปรุง)</option>
                 </select>
               </div>
 

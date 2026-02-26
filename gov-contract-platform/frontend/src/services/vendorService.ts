@@ -17,7 +17,7 @@ export interface Vendor {
   name: string
   name_en?: string
   tax_id: string
-  vendor_type: 'individual' | 'company' | 'partnership' | 'cooperative' | 'state_enterprise'
+  vendor_type: 'individual' | 'company' | 'partnership' | 'cooperative' | 'state_enterprise' | 'other'
   status: 'active' | 'inactive' | 'blacklisted' | 'suspended' | 'pending'
   email?: string
   phone?: string

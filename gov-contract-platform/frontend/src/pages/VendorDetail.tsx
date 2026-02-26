@@ -73,11 +73,11 @@ export default function VendorDetail() {
 
   const getStatusBadge = (status: string) => {
     const configs: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-      active: { label: 'ใช้งาน', color: 'text-green-600', bg: 'bg-green-100', icon: CheckCircle },
-      inactive: { label: 'ไม่ใช้งาน', color: 'text-gray-600', bg: 'bg-gray-100', icon: XCircle },
-      blacklisted: { label: 'แบล็คลิสต์', color: 'text-red-600', bg: 'bg-red-100', icon: Ban },
-      suspended: { label: 'ระงับ', color: 'text-yellow-600', bg: 'bg-yellow-100', icon: AlertTriangle },
-      pending: { label: 'รอดำเนินการ', color: 'text-blue-600', bg: 'bg-blue-100', icon: Calendar }
+      active: { label: 'พร้อมใช้งาน', color: 'text-green-600', bg: 'bg-green-100', icon: CheckCircle },
+      inactive: { label: 'ไม่ใช้งาน (เลิกกิจการ/ไม่ต่อสัญญา)', color: 'text-gray-600', bg: 'bg-gray-100', icon: XCircle },
+      blacklisted: { label: 'แบล็คลิสต์ (ห้ามทำสัญญา)', color: 'text-red-600', bg: 'bg-red-100', icon: Ban },
+      suspended: { label: 'ระงับชั่วคราว (สอบสวน/ปรับปรุง)', color: 'text-yellow-600', bg: 'bg-yellow-100', icon: AlertTriangle },
+      pending: { label: 'รอตรวจสอบเอกสาร', color: 'text-blue-600', bg: 'bg-blue-100', icon: Calendar }
     }
     return configs[status] || configs.inactive
   }
@@ -88,7 +88,8 @@ export default function VendorDetail() {
       individual: 'บุคคลธรรมดา',
       partnership: 'ห้างหุ้นส่วน',
       cooperative: 'สหกรณ์',
-      state_enterprise: 'รัฐวิสาหกิจ'
+      state_enterprise: 'รัฐวิสาหกิจ',
+      other: 'อื่นๆ'
     }
     return types[type] || type
   }
