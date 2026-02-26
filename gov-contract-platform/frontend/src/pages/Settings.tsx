@@ -1202,12 +1202,14 @@ export default function Settings() {
       
       // Fetch triggers for each agent
       const triggersMap: Record<string, any[]> = {}
-      for (const agent of agentsData) {
-        try {
-          const triggers = await getAgentTriggers(agent.id)
-          triggersMap[agent.id] = triggers
-        } catch (e) {
-          triggersMap[agent.id] = []
+      if (agentsRes.status === 'fulfilled' && agentsRes.value) {
+        for (const agent of agentsRes.value) {
+          try {
+            const triggers = await getAgentTriggers(agent.id)
+            triggersMap[agent.id] = triggers
+          } catch (e) {
+            triggersMap[agent.id] = []
+          }
         }
       }
       setAgentTriggers(triggersMap)
