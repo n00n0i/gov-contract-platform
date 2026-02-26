@@ -882,9 +882,10 @@ export default function Settings() {
   const getInitialPreferences = () => {
     const savedTheme = localStorage.getItem('theme')
     const savedDensity = localStorage.getItem('display_density')
+    const savedLanguage = localStorage.getItem('language')
     return {
       dark_mode: savedTheme === 'dark',
-      language: 'th',
+      language: savedLanguage || 'th',
       items_per_page: 20,
       date_format: 'dd/mm/yyyy',
       calendar_system: 'buddhist',
@@ -1083,7 +1084,7 @@ export default function Settings() {
     if (activeTab === 'users') fetchUsers()
   }, [activeTab])
 
-  // Initialize dark mode on mount (runs once)
+  // Initialize settings on mount (runs once)
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme')
     if (savedTheme === 'dark') {
@@ -1095,6 +1096,11 @@ export default function Settings() {
     const savedDensity = localStorage.getItem('display_density')
     if (savedDensity) {
       document.documentElement.setAttribute('data-density', savedDensity)
+    }
+    
+    const savedLanguage = localStorage.getItem('language')
+    if (savedLanguage) {
+      document.documentElement.lang = savedLanguage
     }
   }, [])
 
@@ -1114,6 +1120,12 @@ export default function Settings() {
     document.documentElement.setAttribute('data-density', preferences.display_density)
     localStorage.setItem('display_density', preferences.display_density)
   }, [preferences.display_density])
+
+  // Apply language
+  useEffect(() => {
+    document.documentElement.lang = preferences.language
+    localStorage.setItem('language', preferences.language)
+  }, [preferences.language])
 
   const fetchTemplates = async () => {
     try {
