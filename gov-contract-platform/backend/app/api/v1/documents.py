@@ -121,21 +121,167 @@ def list_documents(
     contract_id: Optional[str] = Query(None),
     document_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Search in extracted OCR text"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    doc_service: DocumentService = Depends(get_doc_service)
+    doc_service: DocumentService = Depends(get_doc_service),
+    db: Session = Depends(get_db)
 ):
     """
     List documents with filters
+    
+    If search parameter is provided, searches in:
+    - Extracted OCR text (full-text search)
+    - Original filename
+    - Document description
     """
-    result = doc_service.list_documents(
-        contract_id=contract_id,
-        document_type=document_type,
-        status=status,
-        page=page,
-        page_size=page_size
+    from app.models.contract import ContractAttachment
+    from sqlalchemy import or_
+    
+    query = db.query(ContractAttachment).filter(ContractAttachment.is_deleted == 0)
+    
+    # Apply filters
+    if contract_id:
+        query = query.filter(ContractAttachment.contract_id == contract_id)
+    if document_type:
+        query = query.filter(ContractAttachment.document_type == document_type)
+    if status:
+        query = query.filter(ContractAttachment.status == status)
+    
+    # Search in OCR text and metadata
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                ContractAttachment.extracted_text.ilike(search_term),
+                ContractAttachment.original_filename.ilike(search_term),
+                ContractAttachment.description.ilike(search_term),
+                ContractAttachment.extracted_contract_number.ilike(search_term)
+            )
+        )
+    
+    # Count total
+    total = query.count()
+    
+    # Pagination
+    documents = query.order_by(ContractAttachment.uploaded_at.desc()).offset(
+        (page - 1) * page_size
+    ).limit(page_size).all()
+    
+    # Generate download URLs for each document
+    storage = doc_service.storage
+    for doc in documents:
+        try:
+            doc.download_url = storage.get_presigned_url(doc.storage_path, expires=3600)
+        except Exception as e:
+            logger.error(f"Failed to generate URL for {doc.id}: {e}")
+            doc.download_url = None
+    
+    return {
+        "items": documents,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": (total + page_size - 1) // page_size
+    }
+
+
+@router.get("/search/content", response_model=dict)
+def search_document_content(
+    q: str = Query(..., description="Search query for OCR text"),
+    contract_id: Optional[str] = Query(None),
+    highlight: bool = Query(True, description="Highlight matching text"),
+    db: Session = Depends(get_db),
+    doc_service: DocumentService = Depends(get_doc_service)
+):
+    """
+    Advanced search in document OCR content
+    
+    Returns documents with matching OCR text and download links to MinIO files.
+    
+    Example:
+        GET /documents/search/content?q=สัญญาก่อสร้าง&highlight=true
+    
+    Response includes:
+    - document_id: ID of the document
+    - filename: Original filename
+    - download_url: Presigned URL to download from MinIO
+    - storage_path: Path in MinIO storage
+    - matching_text: Snippet of matching OCR text (if highlight=true)
+    - ocr_confidence: OCR accuracy score
+    """
+    from app.models.contract import ContractAttachment
+    from sqlalchemy import func
+    
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Search query must be at least 2 characters"
+        )
+    
+    search_term = f"%{q}%"
+    
+    query = db.query(ContractAttachment).filter(
+        ContractAttachment.is_deleted == 0,
+        ContractAttachment.ocr_status == "completed",
+        or_(
+            ContractAttachment.extracted_text.ilike(search_term),
+            ContractAttachment.original_filename.ilike(search_term),
+            ContractAttachment.extracted_contract_number.ilike(search_term)
+        )
     )
-    return result
+    
+    if contract_id:
+        query = query.filter(ContractAttachment.contract_id == contract_id)
+    
+    documents = query.order_by(
+        ContractAttachment.ocr_confidence.desc()
+    ).limit(50).all()
+    
+    results = []
+    for doc in documents:
+        # Generate presigned URL for MinIO download
+        try:
+            download_url = doc_service.storage.get_presigned_url(
+                doc.storage_path, 
+                expires=3600
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate URL for {doc.id}: {e}")
+            download_url = None
+        
+        # Find matching text snippet
+        matching_snippet = None
+        if highlight and doc.extracted_text:
+            import re
+            # Find the search term in text (case insensitive)
+            pattern = re.compile(re.escape(q), re.IGNORECASE)
+            match = pattern.search(doc.extracted_text)
+            if match:
+                start = max(0, match.start() - 50)
+                end = min(len(doc.extracted_text), match.end() + 50)
+                matching_snippet = "..." + doc.extracted_text[start:end] + "..."
+        
+        results.append({
+            "document_id": doc.id,
+            "filename": doc.original_filename,
+            "document_type": doc.document_type,
+            "download_url": download_url,
+            "storage_path": doc.storage_path,
+            "storage_bucket": doc.storage_bucket,
+            "matching_snippet": matching_snippet,
+            "ocr_confidence": float(doc.ocr_confidence) if doc.ocr_confidence else None,
+            "extracted_contract_number": doc.extracted_contract_number,
+            "page_count": doc.page_count,
+            "uploaded_at": doc.uploaded_at
+        })
+    
+    return {
+        "success": True,
+        "query": q,
+        "total_results": len(results),
+        "results": results
+    }
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)

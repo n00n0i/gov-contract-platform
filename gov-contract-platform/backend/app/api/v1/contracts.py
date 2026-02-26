@@ -151,6 +151,202 @@ async def get_contract(
     }
 
 
+@router.get("/{contract_id}/documents/search")
+async def search_contract_documents(
+    contract_id: str,
+    q: str = Query(..., description="Search query in OCR text"),
+    document_type: Optional[str] = Query(None),
+    highlight: bool = Query(True),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Search within contract documents using OCR text
+    
+    This endpoint searches in the extracted OCR text of all documents
+    belonging to a specific contract and returns results with
+    download links to the MinIO files.
+    
+    Example:
+        GET /contracts/123/documents/search?q=มูลค่า 500,000
+    
+    Returns:
+    - document_id: Document UUID
+    - filename: Original filename
+    - download_url: Presigned MinIO URL (valid 1 hour)
+    - matching_text: Text snippet around the match
+    - page_count: Number of pages in document
+    - ocr_confidence: OCR accuracy
+    """
+    from app.models.contract import ContractAttachment
+    from app.services.storage.minio_service import get_storage_service
+    from sqlalchemy import or_
+    import re
+    
+    # Verify contract exists
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters")
+    
+    search_term = f"%{q}%"
+    
+    # Build query
+    query = db.query(ContractAttachment).filter(
+        ContractAttachment.contract_id == contract_id,
+        ContractAttachment.is_deleted == 0,
+        ContractAttachment.ocr_status == "completed",
+        or_(
+            ContractAttachment.extracted_text.ilike(search_term),
+            ContractAttachment.original_filename.ilike(search_term),
+            ContractAttachment.extracted_contract_number.ilike(search_term)
+        )
+    )
+    
+    if document_type:
+        query = query.filter(ContractAttachment.document_type == document_type)
+    
+    # Order by OCR confidence
+    documents = query.order_by(ContractAttachment.ocr_confidence.desc()).all()
+    
+    # Generate download URLs
+    storage = get_storage_service()
+    results = []
+    
+    for doc in documents:
+        # Generate presigned URL for MinIO
+        try:
+            download_url = storage.get_presigned_url(doc.storage_path, expires=3600)
+        except Exception as e:
+            logger.error(f"Failed to generate URL for {doc.id}: {e}")
+            download_url = None
+        
+        # Find matching text snippet
+        matching_snippet = None
+        if highlight and doc.extracted_text:
+            pattern = re.compile(re.escape(q), re.IGNORECASE)
+            match = pattern.search(doc.extracted_text)
+            if match:
+                start = max(0, match.start() - 80)
+                end = min(len(doc.extracted_text), match.end() + 80)
+                snippet = doc.extracted_text[start:end]
+                # Highlight the match
+                highlighted = pattern.sub(lambda m: f"**{m.group()}**", snippet)
+                matching_snippet = "..." + highlighted + "..."
+        
+        results.append({
+            "document_id": doc.id,
+            "filename": doc.original_filename,
+            "document_type": doc.document_type,
+            "description": doc.description,
+            "download_url": download_url,
+            "storage_path": doc.storage_path,
+            "storage_bucket": doc.storage_bucket,
+            "matching_snippet": matching_snippet,
+            "extracted_text_length": len(doc.extracted_text) if doc.extracted_text else 0,
+            "ocr_confidence": float(doc.ocr_confidence) if doc.ocr_confidence else None,
+            "extracted_contract_number": doc.extracted_contract_number,
+            "extracted_value": float(doc.extracted_contract_value) if doc.extracted_contract_value else None,
+            "page_count": doc.page_count,
+            "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None
+        })
+    
+    return {
+        "success": True,
+        "contract_id": contract_id,
+        "contract_no": contract.contract_no,
+        "contract_title": contract.title,
+        "query": q,
+        "total_results": len(results),
+        "results": results
+    }
+
+
+@router.get("/{contract_id}/documents")
+async def list_contract_documents(
+    contract_id: str,
+    document_type: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Search in OCR text"),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    List all documents for a contract with optional OCR text search
+    
+    Returns documents with download URLs from MinIO
+    """
+    from app.models.contract import ContractAttachment
+    from app.services.storage.minio_service import get_storage_service
+    from sqlalchemy import or_
+    
+    # Verify contract exists
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    # Build query
+    query = db.query(ContractAttachment).filter(
+        ContractAttachment.contract_id == contract_id,
+        ContractAttachment.is_deleted == 0
+    )
+    
+    if document_type:
+        query = query.filter(ContractAttachment.document_type == document_type)
+    
+    # Search in OCR text
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                ContractAttachment.extracted_text.ilike(search_term),
+                ContractAttachment.original_filename.ilike(search_term),
+                ContractAttachment.description.ilike(search_term)
+            )
+        )
+    
+    documents = query.order_by(ContractAttachment.uploaded_at.desc()).all()
+    
+    # Generate download URLs
+    storage = get_storage_service()
+    results = []
+    
+    for doc in documents:
+        try:
+            download_url = storage.get_presigned_url(doc.storage_path, expires=3600)
+        except Exception as e:
+            logger.error(f"Failed to generate URL for {doc.id}: {e}")
+            download_url = None
+        
+        results.append({
+            "id": doc.id,
+            "filename": doc.original_filename,
+            "document_type": doc.document_type,
+            "description": doc.description,
+            "file_size": doc.file_size,
+            "mime_type": doc.mime_type,
+            "download_url": download_url,
+            "storage_path": doc.storage_path,
+            "storage_bucket": doc.storage_bucket,
+            "status": doc.status,
+            "ocr_status": doc.ocr_status,
+            "ocr_confidence": float(doc.ocr_confidence) if doc.ocr_confidence else None,
+            "has_extracted_text": bool(doc.extracted_text),
+            "extracted_text_length": len(doc.extracted_text) if doc.extracted_text else 0,
+            "page_count": doc.page_count,
+            "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
+            "processed_at": doc.processed_at.isoformat() if doc.processed_at else None
+        })
+    
+    return {
+        "success": True,
+        "contract_id": contract_id,
+        "total": len(results),
+        "documents": results
+    }
+
+
 @router.post("")
 async def create_contract(
     background_tasks: BackgroundTasks,
