@@ -86,6 +86,7 @@ class DocumentService:
                 # Document type & description
                 document_type=document_data.document_type.value if hasattr(document_data.document_type, 'value') else str(document_data.document_type),
                 description=document_data.description,
+                tags=document_data.tags if document_data.tags else [],
                 
                 # Status
                 status=DocumentStatus.UPLOADING.value,

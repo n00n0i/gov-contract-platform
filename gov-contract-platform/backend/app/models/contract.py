@@ -118,7 +118,7 @@ class Contract(BaseModel):
     retention_percent = Column(Numeric(5, 2))
     
     # Metadata
-    tags = Column(ARRAY(String))
+    tags = Column(ARRAY(String), default=list, server_default='{}')
     custom_metadata = Column(JSONB, default=dict)
     
     # Parent/Amendment
