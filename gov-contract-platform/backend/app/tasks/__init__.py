@@ -4,6 +4,10 @@ Celery Tasks - Background Task Queue
 from celery import Celery
 from app.core.config import settings
 
+# Import all models to ensure SQLAlchemy mappers are initialized
+# This must happen before any tasks run to avoid mapper errors
+from app.models import base, identity, contract, vendor, notification_models
+
 # Create Celery app
 celery_app = Celery(
     "gov_contract_platform",

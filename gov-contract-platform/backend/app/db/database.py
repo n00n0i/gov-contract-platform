@@ -77,7 +77,7 @@ def create_tables():
     """Create all database tables"""
     try:
         # Import all models to ensure they're registered
-        from app.models import base, identity, contract, vendor
+        from app.models import base, identity, contract, vendor, notification_models
         
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully")

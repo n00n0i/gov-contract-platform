@@ -73,7 +73,7 @@ class User(BaseModel):
     
     # Preferences
     preferences = Column(JSONB, default=dict)
-    notification_settings = Column(JSONB, default=dict)
+    notification_prefs = Column(JSONB, default=dict)  # Renamed to avoid conflict with relationship
     
     
     # Relationships
