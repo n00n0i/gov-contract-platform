@@ -92,6 +92,14 @@ class Vendor(BaseModel):
     blacklisted_at = Column(Date)
     blacklisted_by = Column(String(36))
     
+    # Email verification
+    email_verified = Column(Boolean, default=False)
+    email_verification_token = Column(String(100))
+    email_verified_at = Column(Date)
+    
+    # System flag (for sample/demo data)
+    is_system = Column(Boolean, default=False)
+    
     # Metadata
     tags = Column(ARRAY(String))
     custom_metadata = Column(JSONB, default=dict)

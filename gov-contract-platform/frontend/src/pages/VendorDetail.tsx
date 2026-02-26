@@ -4,7 +4,7 @@ import {
   Building2, User, Mail, Phone, MapPin, CreditCard, Globe,
   FileText, AlertTriangle, ChevronLeft, Edit, Trash2, 
   Briefcase, Landmark, CheckCircle, XCircle, Calendar,
-  Star, Package, TrendingUp, Ban
+  Star, Package, TrendingUp, Ban, Shield
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import vendorService from '../services/vendorService'
@@ -173,7 +173,7 @@ export default function VendorDetail() {
                 {vendor.name_en && (
                   <p className="text-gray-500">{vendor.name_en}</p>
                 )}
-                <div className="flex items-center gap-2 mt-2">
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${status.bg} ${status.color}`}>
                     <StatusIcon className="w-4 h-4" />
                     {status.label}
@@ -184,6 +184,12 @@ export default function VendorDetail() {
                   <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm">
                     เลขผู้เสียภาษี: {vendor.tax_id}
                   </span>
+                  {vendor.is_system && (
+                    <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm flex items-center gap-1">
+                      <Shield className="w-3 h-3" />
+                      ข้อมูลตัวอย่าง
+                    </span>
+                  )}
                 </div>
                 {vendor.is_blacklisted && vendor.blacklist_reason && (
                   <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -204,6 +210,22 @@ export default function VendorDetail() {
                 <Edit className="w-4 h-4" />
                 แก้ไข
               </button>
+              {vendor.email && !vendor.email_verified && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await vendorService.verifyEmail(id!)
+                      fetchVendor(id!)
+                    } catch (err: any) {
+                      setError(err.response?.data?.detail || 'ไม่สามารถยืนยันอีเมลได้')
+                    }
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                >
+                  <Shield className="w-4 h-4" />
+                  ยืนยันอีเมล
+                </button>
+              )}
               {!vendor.is_blacklisted && (
                 <button
                   onClick={() => setShowBlacklistModal(true)}
@@ -213,13 +235,15 @@ export default function VendorDetail() {
                   แบล็คลิสต์
                 </button>
               )}
-              <button
-                onClick={() => setShowDeleteModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
-              >
-                <Trash2 className="w-4 h-4" />
-                ลบ
-              </button>
+              {!vendor.is_system && (
+                <button
+                  onClick={() => setShowDeleteModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  ลบ
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -236,11 +260,21 @@ export default function VendorDetail() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {vendor.email && (
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-                      <Mail className="w-5 h-5 text-blue-600" />
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${vendor.email_verified ? 'bg-green-50' : 'bg-amber-50'}`}>
+                      <Mail className={`w-5 h-5 ${vendor.email_verified ? 'text-green-600' : 'text-amber-600'}`} />
                     </div>
                     <div>
-                      <p className="text-sm text-gray-500">อีเมล</p>
+                      <p className="text-sm text-gray-500">
+                        อีเมล
+                        {vendor.email_verified ? (
+                          <span className="ml-2 text-xs text-green-600 flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            ยืนยันแล้ว
+                          </span>
+                        ) : (
+                          <span className="ml-2 text-xs text-amber-600">ยังไม่ยืนยัน</span>
+                        )}
+                      </p>
                       <p className="font-medium">{vendor.email}</p>
                     </div>
                   </div>

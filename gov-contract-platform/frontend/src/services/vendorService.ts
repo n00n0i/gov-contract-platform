@@ -40,6 +40,9 @@ export interface Vendor {
   is_blacklisted: boolean
   blacklist_reason?: string
   blacklisted_at?: string
+  email_verified: boolean
+  email_verified_at?: string
+  is_system: boolean
   notes?: string
   custom_fields?: Record<string, any>
   created_at?: string
@@ -114,6 +117,26 @@ export const vendorService = {
   // Blacklist vendor
   blacklistVendor: async (id: string, reason: string): Promise<VendorResponse> => {
     const response = await api.post(`/vendors/${id}/blacklist`, { reason })
+    return response.data
+  },
+
+  // Verify vendor email
+  verifyEmail: async (id: string): Promise<VendorResponse> => {
+    const response = await api.post(`/vendors/${id}/verify-email`)
+    return response.data
+  },
+
+  // Bulk action on vendors
+  bulkAction: async (action: 'activate' | 'deactivate' | 'delete', vendorIds: string[]): Promise<{
+    success: boolean
+    message: string
+    data: {
+      action: string
+      updated: number
+      skipped: number
+    }
+  }> => {
+    const response = await api.post('/vendors/bulk-action', { action, vendor_ids: vendorIds })
     return response.data
   },
 

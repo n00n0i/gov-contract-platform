@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { 
   Save, X, Building2, User, Mail, Phone, MapPin, 
   CreditCard, Globe, FileText, AlertTriangle, ChevronLeft,
-  Briefcase, Landmark
+  Briefcase, Landmark, CheckCircle, Shield
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import vendorService from '../services/vendorService'
@@ -257,17 +257,49 @@ export default function CreateVendor() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   อีเมล
+                  {isEdit && formData.email_verified && (
+                    <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs">
+                      <CheckCircle className="w-3 h-3" />
+                      ยืนยันแล้ว
+                    </span>
+                  )}
                 </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="email"
-                    value={formData.email || ''}
-                    onChange={(e) => handleChange('email', e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="email@example.com"
-                  />
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="email"
+                      value={formData.email || ''}
+                      onChange={(e) => handleChange('email', e.target.value)}
+                      className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                        formData.email_verified ? 'border-green-500 bg-green-50' : ''
+                      }`}
+                      placeholder="email@example.com"
+                    />
+                  </div>
+                  {isEdit && !formData.email_verified && formData.email && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await vendorService.verifyEmail(id!)
+                          setFormData(prev => ({ ...prev, email_verified: true }))
+                        } catch (err: any) {
+                          setError(err.response?.data?.detail || 'ไม่สามารถยืนยันอีเมลได้')
+                        }
+                      }}
+                      className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm whitespace-nowrap"
+                    >
+                      <Shield className="w-4 h-4 inline mr-1" />
+                      ยืนยัน
+                    </button>
+                  )}
                 </div>
+                {isEdit && !formData.email_verified && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    ⚠️ อีเมลยังไม่ได้รับการยืนยัน
+                  </p>
+                )}
               </div>
 
               <div>

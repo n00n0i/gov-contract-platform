@@ -5,7 +5,7 @@ import {
   Star, Phone, Mail, MapPin, FileText, CheckCircle,
   XCircle, AlertTriangle, ChevronLeft, ChevronRight,
   Download, Eye, Edit, Trash2, Award, TrendingUp,
-  Calendar, DollarSign, User, Ban
+  Calendar, DollarSign, User, Ban, Power, PowerOff
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import vendorService from '../services/vendorService'
@@ -241,6 +241,61 @@ export default function Vendors() {
                 }
               </span>
             </div>
+            
+            {/* Bulk Actions */}
+            {selectedVendors.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      await vendorService.bulkAction('activate', selectedVendors)
+                      fetchVendors()
+                      fetchStats()
+                      setSelectedVendors([])
+                    } catch (error) {
+                      alert('ไม่สามารถเปิดใช้งานได้')
+                    }
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition"
+                >
+                  <Power className="w-4 h-4" />
+                  เปิดใช้งาน
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      await vendorService.bulkAction('deactivate', selectedVendors)
+                      fetchVendors()
+                      fetchStats()
+                      setSelectedVendors([])
+                    } catch (error) {
+                      alert('ไม่สามารถปิดใช้งานได้')
+                    }
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-600 text-white text-sm rounded-lg hover:bg-gray-700 transition"
+                >
+                  <PowerOff className="w-4 h-4" />
+                  ปิดใช้งาน
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!confirm(`ลบผู้รับจ้าง ${selectedVendors.length} รายการ?`)) return
+                    try {
+                      await vendorService.bulkAction('delete', selectedVendors)
+                      fetchVendors()
+                      fetchStats()
+                      setSelectedVendors([])
+                    } catch (error) {
+                      alert('ไม่สามารถลบได้')
+                    }
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  ลบ
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Table */}
@@ -322,6 +377,9 @@ export default function Vendors() {
                             <div className="flex items-center gap-1 text-sm text-gray-600 mt-1">
                               <Mail className="w-4 h-4" />
                               {vendor.email}
+                              {!vendor.email_verified && (
+                                <span className="text-xs text-amber-600 ml-1" title="ยังไม่ยืนยันอีเมล">⚠️</span>
+                              )}
                             </div>
                           )}
                           {vendor.province && (
@@ -353,13 +411,15 @@ export default function Vendors() {
                             >
                               <Edit className="w-4 h-4 text-gray-600" />
                             </button>
-                            <button
-                              onClick={() => handleDelete(vendor.id)}
-                              className="p-2 hover:bg-red-50 rounded-lg transition"
-                              title="ลบ"
-                            >
-                              <Trash2 className="w-4 h-4 text-red-600" />
-                            </button>
+                            {!vendor.is_system && (
+                              <button
+                                onClick={() => handleDelete(vendor.id)}
+                                className="p-2 hover:bg-red-50 rounded-lg transition"
+                                title="ลบ"
+                              >
+                                <Trash2 className="w-4 h-4 text-red-600" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

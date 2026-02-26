@@ -67,6 +67,8 @@ async def list_vendors(
                 "website": v.website,
                 "is_blacklisted": v.is_blacklisted,
                 "blacklist_reason": v.blacklist_reason,
+                "email_verified": v.email_verified,
+                "is_system": v.is_system,
                 "created_at": v.created_at.isoformat() if v.created_at else None,
             }
             for v in vendors
@@ -123,6 +125,9 @@ async def get_vendor(
             "is_blacklisted": vendor.is_blacklisted,
             "blacklist_reason": vendor.blacklist_reason,
             "blacklisted_at": vendor.blacklisted_at.isoformat() if vendor.blacklisted_at else None,
+            "email_verified": vendor.email_verified,
+            "email_verified_at": vendor.email_verified_at.isoformat() if vendor.email_verified_at else None,
+            "is_system": vendor.is_system,
             "notes": vendor.notes,
             "custom_fields": vendor.custom_fields,
             "created_at": vendor.created_at.isoformat() if vendor.created_at else None,
@@ -258,6 +263,10 @@ async def delete_vendor(
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     
+    # Prevent deletion of system vendors
+    if vendor.is_system:
+        raise HTTPException(status_code=403, detail="ไม่สามารถลบข้อมูลตัวอย่างของระบบได้")
+    
     try:
         vendor.is_deleted = True
         vendor.deleted_at = datetime.utcnow()
@@ -335,3 +344,115 @@ async def get_vendor_stats(
             "blacklisted_vendors": blacklisted,
         }
     }
+
+
+@router.post("/vendors/{vendor_id}/verify-email")
+async def verify_vendor_email(
+    vendor_id: str,
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """Verify vendor email (manual verification by admin)"""
+    user_id = user_payload.get("sub")
+    
+    vendor = db.query(Vendor).filter(Vendor.id == vendor_id, Vendor.is_deleted == 0).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    try:
+        vendor.email_verified = True
+        vendor.email_verified_at = datetime.utcnow()
+        vendor.updated_by = user_id
+        vendor.updated_at = datetime.utcnow()
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Email verified successfully",
+            "data": {
+                "id": vendor.id,
+                "email": vendor.email,
+                "email_verified": vendor.email_verified,
+                "email_verified_at": vendor.email_verified_at.isoformat() if vendor.email_verified_at else None,
+            }
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to verify email: {str(e)}")
+
+
+@router.post("/vendors/bulk-action")
+async def bulk_vendor_action(
+    data: dict,
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """Bulk actions on vendors"""
+    user_id = user_payload.get("sub")
+    action = data.get("action")
+    vendor_ids = data.get("vendor_ids", [])
+    
+    if not vendor_ids:
+        raise HTTPException(status_code=400, detail="No vendors selected")
+    
+    if action not in ["activate", "deactivate", "delete"]:
+        raise HTTPException(status_code=400, detail="Invalid action")
+    
+    vendors = db.query(Vendor).filter(
+        Vendor.id.in_(vendor_ids),
+        Vendor.is_deleted == 0
+    ).all()
+    
+    if not vendors:
+        raise HTTPException(status_code=404, detail="No vendors found")
+    
+    try:
+        updated_count = 0
+        skipped_count = 0
+        
+        for vendor in vendors:
+            # Skip system vendors for delete action
+            if action == "delete" and vendor.is_system:
+                skipped_count += 1
+                continue
+                
+            if action == "activate":
+                vendor.status = VendorStatus.ACTIVE
+            elif action == "deactivate":
+                vendor.status = VendorStatus.INACTIVE
+            elif action == "delete":
+                vendor.is_deleted = True
+                vendor.deleted_at = datetime.utcnow()
+                vendor.deleted_by = user_id
+            
+            vendor.updated_by = user_id
+            vendor.updated_at = datetime.utcnow()
+            updated_count += 1
+        
+        db.commit()
+        
+        action_labels = {
+            "activate": "เปิดใช้งาน",
+            "deactivate": "ปิดใช้งาน",
+            "delete": "ลบ"
+        }
+        
+        message = f"{action_labels[action]} {updated_count} รายการสำเร็จ"
+        if skipped_count > 0:
+            message += f" (ข้าม {skipped_count} รายการที่เป็นข้อมูลระบบ)"
+        
+        return {
+            "success": True,
+            "message": message,
+            "data": {
+                "action": action,
+                "updated": updated_count,
+                "skipped": skipped_count
+            }
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to perform bulk action: {str(e)}")
