@@ -1,5 +1,15 @@
 """
 OCR Service - Document text extraction
+
+This service now uses centralized OCR Settings from the database.
+All OCR operations should go through OCRSettingsService for configuration.
+
+Usage:
+    from app.services.document.ocr_settings_service import get_ocr_settings_service
+    
+    ocr_settings_service = get_ocr_settings_service(db, user_id)
+    ocr_service = OCRService(ocr_settings_service)
+    result = ocr_service.process_document(file_data, mime_type)
 """
 import io
 import logging
@@ -10,18 +20,45 @@ import pytesseract
 from pdf2image import convert_from_bytes
 from PIL import Image
 import pdfplumber
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.schemas.document import OCRResult
+from app.services.document.ocr_settings_service import OCRSettingsService, get_ocr_settings_service
 
 logger = logging.getLogger(__name__)
 
 
 class OCRService:
-    """OCR processing service"""
+    """
+    OCR processing service - now uses centralized OCR Settings
     
-    def __init__(self):
-        self.language = settings.OCR_LANGUAGE  # tha+eng
+    This service uses OCRSettingsService to get configuration from database.
+    Do not use settings.OCR_LANGUAGE directly - always use ocr_settings_service.
+    """
+    
+    def __init__(self, ocr_settings_service: Optional[OCRSettingsService] = None):
+        """
+        Initialize OCR Service
+        
+        Args:
+            ocr_settings_service: OCR settings service instance.
+                                  If not provided, uses default settings from config.
+        """
+        self._settings_service = ocr_settings_service
+        # Fallback to config settings if no settings service provided
+        self._language = settings.OCR_LANGUAGE if ocr_settings_service is None else None
+    
+    def _get_settings_service(self) -> Optional[OCRSettingsService]:
+        """Get the OCR settings service"""
+        return self._settings_service
+    
+    @property
+    def language(self) -> str:
+        """Get OCR language from settings service or fallback"""
+        if self._settings_service:
+            return self._settings_service.get_language()
+        return self._language or "tha+eng"
     
     def process_document(self, file_data: bytes, mime_type: str) -> OCRResult:
         """

@@ -1,5 +1,8 @@
 """
 OCR API Routes - Test and process documents with various OCR engines
+
+All OCR operations use settings from the centralized OCR Settings (Settings > OCR).
+This ensures consistent OCR behavior across the entire application.
 """
 import io
 import json
@@ -11,12 +14,92 @@ from fastapi.responses import JSONResponse
 from pdf2image import convert_from_bytes
 from PIL import Image
 import pytesseract
+from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user_payload
+from app.core.security import get_current_user_payload, get_current_user_id
 from app.core.logging import get_logger
+from app.db.database import get_db
+from app.services.document.ocr_settings_service import get_ocr_settings_service, OCRSettingsService
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 logger = get_logger(__name__)
+
+
+@router.post("/process")
+async def process_with_ocr_settings(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Process document using centralized OCR Settings from Settings > OCR
+    
+    This endpoint uses the OCR settings configured in the system settings.
+    All document processing should use this endpoint to ensure consistency.
+    
+    - **file**: PDF or image file to process
+    
+    Returns extracted text from the document using the configured OCR engine.
+    """
+    # Validate file type
+    allowed_types = [
+        "application/pdf",
+        "image/jpeg", "image/png", "image/tiff", "image/jpg"
+    ]
+    
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type: {file.content_type}. Allowed: PDF, JPG, PNG, TIFF"
+        )
+    
+    # Validate file size (10MB max)
+    MAX_SIZE = 10 * 1024 * 1024
+    file_content = await file.read()
+    if len(file_content) > MAX_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size is 10MB"
+        )
+    
+    # Get OCR settings from centralized service
+    ocr_settings_service = get_ocr_settings_service(db, user_id)
+    ocr_settings = ocr_settings_service.get_settings()
+    
+    # Validate settings before processing
+    validation = ocr_settings_service.validate_settings()
+    if not validation["valid"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"OCR settings validation failed: {'; '.join(validation['errors'])}"
+        )
+    
+    mode = ocr_settings_service.get_mode()
+    logger.info(f"Processing OCR with mode: {mode} for user {user_id}")
+    
+    try:
+        if mode == "typhoon":
+            result = await process_typhoon_ocr(file_content, file.content_type, file.filename, ocr_settings)
+        elif mode == "custom":
+            result = await process_custom_ocr(file_content, file.content_type, file.filename, ocr_settings)
+        else:  # default - Tesseract
+            result = await process_tesseract_ocr(file_content, file.content_type, ocr_settings)
+        
+        # Add settings info to result
+        result["settings_used"] = {
+            "mode": mode,
+            "engine": ocr_settings.get("engine", "tesseract"),
+            "language": ocr_settings.get("language", "tha+eng")
+        }
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"OCR processing error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"OCR processing failed: {str(e)}"
+        )
 
 
 @router.post("/test")
@@ -26,7 +109,10 @@ async def test_ocr(
     user_payload: dict = Depends(get_current_user_payload)
 ):
     """
-    Test OCR with uploaded file and settings
+    Test OCR with custom settings (for testing purposes)
+    
+    This endpoint allows testing with custom settings without saving them.
+    For production use, use /process endpoint which uses saved OCR settings.
     
     - **file**: PDF or image file to process
     - **settings**: JSON string containing OCR configuration
@@ -83,6 +169,34 @@ async def test_ocr(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"OCR processing failed: {str(e)}"
         )
+
+
+@router.get("/status")
+def get_ocr_status(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Get current OCR settings status
+    
+    Returns the current OCR mode and validation status.
+    Use this to check if OCR is properly configured before processing.
+    """
+    ocr_settings_service = get_ocr_settings_service(db, user_id)
+    settings = ocr_settings_service.get_settings()
+    validation = ocr_settings_service.validate_settings()
+    
+    return {
+        "success": True,
+        "data": {
+            "mode": settings.get("mode", "default"),
+            "engine": settings.get("engine", "tesseract"),
+            "language": settings.get("language", "tha+eng"),
+            "is_typhoon_configured": ocr_settings_service.is_typhoon_configured(),
+            "is_custom_api_configured": ocr_settings_service.is_custom_api_configured(),
+            "validation": validation
+        }
+    }
 
 
 async def process_tesseract_ocr(

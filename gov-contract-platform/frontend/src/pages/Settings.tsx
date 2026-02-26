@@ -1710,6 +1710,7 @@ export default function Settings() {
     }
   }
 
+  // Test OCR with current settings (custom settings)
   const handleOcrTest = async () => {
     if (!ocrTestFile) {
       setMessage({ type: 'error', text: 'กรุณาเลือกไฟล์ก่อน' })
@@ -1731,7 +1732,7 @@ export default function Settings() {
 
       if (response.data?.text) {
         setOcrTestResult(response.data.text)
-        setMessage({ type: 'success', text: 'OCR สำเร็จ' })
+        setMessage({ type: 'success', text: 'OCR สำเร็จ (ใช้การตั้งค่าชั่วคราว)' })
       } else {
         setOcrTestResult(JSON.stringify(response.data, null, 2))
       }
@@ -1740,6 +1741,44 @@ export default function Settings() {
       setMessage({ 
         type: 'error', 
         text: err.response?.data?.detail || 'OCR ล้มเหลว กรุณาลองใหม่' 
+      })
+    } finally {
+      setOcrTestLoading(false)
+    }
+  }
+
+  // Test OCR with saved settings from database (production mode)
+  const handleOcrTestWithSavedSettings = async () => {
+    if (!ocrTestFile) {
+      setMessage({ type: 'error', text: 'กรุณาเลือกไฟล์ก่อน' })
+      return
+    }
+
+    setOcrTestLoading(true)
+    setOcrTestResult('')
+    setMessage(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', ocrTestFile)
+      // No settings - backend will use saved OCR settings
+
+      const response = await api.post('/ocr/process', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      if (response.data?.text) {
+        setOcrTestResult(response.data.text)
+        const mode = response.data?.settings_used?.mode || 'default'
+        setMessage({ type: 'success', text: `OCR สำเร็จ (โหมด: ${mode})` })
+      } else {
+        setOcrTestResult(JSON.stringify(response.data, null, 2))
+      }
+    } catch (err: any) {
+      console.error('OCR Error:', err)
+      setMessage({ 
+        type: 'error', 
+        text: err.response?.data?.detail || 'OCR ล้มเหลว กรุณาตรวจสอบการตั้งค่า' 
       })
     } finally {
       setOcrTestLoading(false)
@@ -2895,11 +2934,12 @@ export default function Settings() {
                     )}
                   </div>
 
-                  {/* Run OCR Button */}
+                  {/* Run OCR Buttons */}
                   {ocrTestFile && (
-                    <div className="mt-4">
+                    <div className="mt-4 space-y-3">
+                      {/* Primary: Test with saved settings */}
                       <button
-                        onClick={handleOcrTest}
+                        onClick={handleOcrTestWithSavedSettings}
                         disabled={ocrTestLoading}
                         className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition disabled:opacity-50"
                       >
@@ -2911,9 +2951,19 @@ export default function Settings() {
                         ) : (
                           <>
                             <ScanLine className="w-5 h-5" />
-                            เริ่ม OCR
+                            ทดสอบด้วยการตั้งค่าที่บันทึก
                           </>
                         )}
+                      </button>
+                      
+                      {/* Secondary: Test with current settings (custom) */}
+                      <button
+                        onClick={handleOcrTest}
+                        disabled={ocrTestLoading}
+                        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-white border-2 border-orange-200 text-orange-600 rounded-lg hover:bg-orange-50 transition disabled:opacity-50"
+                      >
+                        <ScanLine className="w-5 h-5" />
+                        ทดสอบด้วยการตั้งค่าชั่วคราว (ไม่บันทึก)
                       </button>
                     </div>
                   )}
