@@ -882,7 +882,11 @@ export default function Settings() {
   const [preferences, setPreferences] = useState({
     dark_mode: false,
     language: 'th',
-    items_per_page: 20
+    items_per_page: 20,
+    date_format: 'dd/mm/yyyy',
+    calendar_system: 'buddhist',
+    default_page: 'dashboard',
+    display_density: 'normal'
   })
 
   // OCR Settings
@@ -1072,6 +1076,22 @@ export default function Settings() {
     if (activeTab === 'org-structure') fetchOrgData()
     if (activeTab === 'users') fetchUsers()
   }, [activeTab])
+
+  // Apply dark mode to document
+  useEffect(() => {
+    if (preferences.dark_mode) {
+      document.documentElement.classList.add('dark')
+      localStorage.setItem('theme', 'dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+      localStorage.setItem('theme', 'light')
+    }
+  }, [preferences.dark_mode])
+
+  // Apply display density
+  useEffect(() => {
+    document.documentElement.setAttribute('data-density', preferences.display_density)
+  }, [preferences.display_density])
 
   const fetchTemplates = async () => {
     try {
@@ -1754,123 +1774,138 @@ export default function Settings() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           {/* Sidebar */}
           <div className="md:col-span-1">
-            <nav className="space-y-1">
+            <nav className="space-y-0.5">
+
+              {/* Group: ส่วนตัว */}
+              <p className="px-3 pt-2 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">ส่วนตัว</p>
               <button
                 onClick={() => setActiveTab('security')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
                   activeTab === 'security' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
                 }`}
               >
-                <Shield className="w-5 h-5" />
-                <span className="font-medium">ความปลอดภัย</span>
+                <Shield className="w-4 h-4" />
+                <span className="text-sm font-medium">โปรไฟล์และความปลอดภัย</span>
               </button>
               <button
                 onClick={() => setActiveTab('notifications')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
                   activeTab === 'notifications' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
                 }`}
               >
-                <Bell className="w-5 h-5" />
-                <span className="font-medium">การแจ้งเตือน</span>
+                <Bell className="w-4 h-4" />
+                <span className="text-sm font-medium">การแจ้งเตือน</span>
               </button>
               <button
                 onClick={() => setActiveTab('preferences')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
                   activeTab === 'preferences' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
                 }`}
               >
-                <Globe className="w-5 h-5" />
-                <span className="font-medium">การตั้งค่าทั่วไป</span>
+                <Globe className="w-4 h-4" />
+                <span className="text-sm font-medium">การตั้งค่าทั่วไป</span>
               </button>
-              <button
-                onClick={() => setActiveTab('system')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
-                  activeTab === 'system' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Server className="w-5 h-5" />
-                <span className="font-medium">ระบบและเซิร์ฟเวอร์</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('ocr')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
-                  activeTab === 'ocr' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <ScanLine className="w-5 h-5" />
-                <span className="font-medium">ตั้งค่า OCR</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('ai')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
-                  activeTab === 'ai' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Brain className="w-5 h-5" />
-                <span className="font-medium">ตั้งค่า AI Models</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('ai-features')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
-                  activeTab === 'ai-features' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Sparkles className="w-5 h-5" />
-                <span className="font-medium">ตั้งค่า AI Features</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('agents')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
-                  activeTab === 'agents' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Bot className="w-5 h-5" />
-                <span className="font-medium">ตั้งค่า Agent</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('knowledge')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
-                  activeTab === 'knowledge' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <BookOpen className="w-5 h-5" />
-                <span className="font-medium">Knowledge Base (RAG)</span>
-              </button>
-              <button
-                onClick={() => { setActiveTab('graphrag'); fetchGraphStats() }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
-                  activeTab === 'graphrag' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Workflow className="w-5 h-5" />
-                <span className="font-medium">GraphRAG</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('org-structure')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
-                  activeTab === 'org-structure' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Building2 className="w-5 h-5" />
-                <span className="font-medium">โครงสร้างองค์กร</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('users')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
-                  activeTab === 'users' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Users className="w-5 h-5" />
-                <span className="font-medium">จัดการผู้ใช้</span>
-              </button>
+
+              {/* Group: สัญญาและเอกสาร */}
+              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">สัญญา</p>
               <button
                 onClick={() => setActiveTab('templates')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition text-left ${
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
                   activeTab === 'templates' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
                 }`}
               >
-                <FileStack className="w-5 h-5" />
-                <span className="font-medium">ตัวอย่างสัญญา</span>
+                <FileStack className="w-4 h-4" />
+                <span className="text-sm font-medium">แม่แบบสัญญา</span>
+              </button>
+
+              {/* Group: AI & Automation */}
+              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">AI & Automation</p>
+              <button
+                onClick={() => setActiveTab('ai')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'ai' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <Brain className="w-4 h-4" />
+                <span className="text-sm font-medium">AI Models</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('ai-features')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'ai-features' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <Sparkles className="w-4 h-4" />
+                <span className="text-sm font-medium">AI Features</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('agents')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'agents' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <Bot className="w-4 h-4" />
+                <span className="text-sm font-medium">Agents</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('knowledge')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'knowledge' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <BookOpen className="w-4 h-4" />
+                <span className="text-sm font-medium">Knowledge Base (RAG)</span>
+              </button>
+              <button
+                onClick={() => { setActiveTab('graphrag'); fetchGraphStats() }}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'graphrag' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <Workflow className="w-4 h-4" />
+                <span className="text-sm font-medium">GraphRAG</span>
+              </button>
+
+              {/* Group: ระบบ */}
+              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">ระบบ</p>
+              <button
+                onClick={() => setActiveTab('ocr')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'ocr' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <ScanLine className="w-4 h-4" />
+                <span className="text-sm font-medium">OCR</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('system')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'system' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <Server className="w-4 h-4" />
+                <span className="text-sm font-medium">เซิร์ฟเวอร์และ API</span>
+              </button>
+
+              {/* Group: การจัดการ */}
+              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">การจัดการ</p>
+              <button
+                onClick={() => setActiveTab('org-structure')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'org-structure' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <Building2 className="w-4 h-4" />
+                <span className="text-sm font-medium">โครงสร้างองค์กร</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('users')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'users' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span className="text-sm font-medium">จัดการผู้ใช้</span>
               </button>
             </nav>
           </div>
@@ -2026,75 +2061,206 @@ export default function Settings() {
               </div>
             )}
 
-            {/* Preferences -->
+            {/* Preferences */}
             {activeTab === 'preferences' && (
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <div className="flex items-center gap-3 mb-6">
-                  <Globe className="w-6 h-6 text-blue-600" />
-                  <h2 className="text-lg font-semibold text-gray-900">การตั้งค่าทั่วไป</h2>
+              <div className="space-y-6">
+                {/* Display & Theme */}
+                <div className="bg-white rounded-xl shadow-sm border p-6">
+                  <div className="flex items-center gap-3 mb-6">
+                    <Globe className="w-6 h-6 text-blue-600" />
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">การแสดงผล</h2>
+                      <p className="text-sm text-gray-500">ธีม ภาษา และความหนาแน่นของหน้าจอ</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    {/* Theme */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-3">ธีม</label>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setPreferences({ ...preferences, dark_mode: false })}
+                          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border-2 transition ${
+                            !preferences.dark_mode ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <Sun className="w-5 h-5" />
+                          <span className="font-medium">สว่าง</span>
+                        </button>
+                        <button
+                          onClick={() => setPreferences({ ...preferences, dark_mode: true })}
+                          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border-2 transition ${
+                            preferences.dark_mode ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <Moon className="w-5 h-5" />
+                          <span className="font-medium">มืด</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Display Density */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-3">ความหนาแน่นการแสดงผล</label>
+                      <div className="flex gap-3">
+                        {[
+                          { value: 'compact', label: 'กระทัดรัด', desc: 'ข้อมูลมากขึ้นในหน้าเดียว' },
+                          { value: 'normal', label: 'ปกติ', desc: 'ค่าเริ่มต้น' },
+                          { value: 'comfortable', label: 'โปร่ง', desc: 'อ่านง่ายขึ้น' }
+                        ].map((d) => (
+                          <button
+                            key={d.value}
+                            onClick={() => setPreferences({ ...preferences, display_density: d.value })}
+                            className={`flex-1 px-3 py-2.5 rounded-lg border-2 text-center transition ${
+                              preferences.display_density === d.value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                            }`}
+                          >
+                            <p className="font-medium text-sm">{d.label}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">{d.desc}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Language */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">ภาษาอินเตอร์เฟซ</label>
+                        <select
+                          value={preferences.language}
+                          onChange={(e) => setPreferences({ ...preferences, language: e.target.value })}
+                          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="th">ไทย</option>
+                          <option value="en">English</option>
+                        </select>
+                      </div>
+
+                      {/* Items Per Page */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">จำนวนรายการต่อหน้า</label>
+                        <select
+                          value={preferences.items_per_page}
+                          onChange={(e) => setPreferences({ ...preferences, items_per_page: parseInt(e.target.value) })}
+                          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value={10}>10 รายการ</option>
+                          <option value={20}>20 รายการ</option>
+                          <option value={50}>50 รายการ</option>
+                          <option value={100}>100 รายการ</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
-                      ธีม
-                    </label>
-                    <div className="flex gap-4">
-                      <button
-                        onClick={() => setPreferences({...preferences, dark_mode: false})}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition ${
-                          !preferences.dark_mode ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-300'
-                        }`}
+                {/* Date & Region */}
+                <div className="bg-white rounded-xl shadow-sm border p-6">
+                  <div className="flex items-center gap-3 mb-6">
+                    <Clock className="w-6 h-6 text-blue-600" />
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">วันที่และภูมิภาค</h2>
+                      <p className="text-sm text-gray-500">รูปแบบวันที่ ระบบปฏิทิน และเขตเวลา</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-6">
+                    {/* Calendar System */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-3">ระบบปฏิทิน</label>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setPreferences({ ...preferences, calendar_system: 'buddhist' })}
+                          className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-center transition ${
+                            preferences.calendar_system === 'buddhist' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <p className="font-medium text-sm">พุทธศักราช</p>
+                          <p className="text-xs text-gray-400">พ.ศ. 2568</p>
+                        </button>
+                        <button
+                          onClick={() => setPreferences({ ...preferences, calendar_system: 'gregorian' })}
+                          className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-center transition ${
+                            preferences.calendar_system === 'gregorian' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <p className="font-medium text-sm">คริสต์ศักราช</p>
+                          <p className="text-xs text-gray-400">ค.ศ. 2025</p>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Date Format */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">รูปแบบวันที่</label>
+                      <select
+                        value={preferences.date_format}
+                        onChange={(e) => setPreferences({ ...preferences, date_format: e.target.value })}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       >
-                        <Sun className="w-5 h-5" />
-                        สว่าง
-                      </button>
-                      <button
-                        onClick={() => setPreferences({...preferences, dark_mode: true})}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition ${
-                          preferences.dark_mode ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-300'
-                        }`}
-                      >
-                        <Moon className="w-5 h-5" />
-                        มืด
-                      </button>
+                        <option value="dd/mm/yyyy">วว/ดด/ปปปป (26/02/2568)</option>
+                        <option value="dd-mm-yyyy">วว-ดด-ปปปป (26-02-2568)</option>
+                        <option value="yyyy-mm-dd">ปปปป-ดด-วว (2568-02-26)</option>
+                        <option value="dd mmmm yyyy">วว เดือน ปปปป (26 กุมภาพันธ์ 2568)</option>
+                        <option value="d mmmm yyyy">วว เดือน ปปปป (26 กุมภาพันธ์ 2568 พ.ศ.)</option>
+                      </select>
+                    </div>
+
+                    {/* Timezone (display only) */}
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">เขตเวลา</label>
+                      <div className="flex items-center gap-3 px-4 py-2.5 border rounded-lg bg-gray-50">
+                        <Globe className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                        <div>
+                          <span className="font-medium text-gray-700">Asia/Bangkok (UTC+7)</span>
+                          <span className="ml-2 text-sm text-gray-500">— เวลาประเทศไทยมาตรฐาน</span>
+                        </div>
+                        <span className="ml-auto text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded">ค่าคงที่</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Navigation */}
+                <div className="bg-white rounded-xl shadow-sm border p-6">
+                  <div className="flex items-center gap-3 mb-6">
+                    <SettingsIcon className="w-6 h-6 text-blue-600" />
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">การนำทาง</h2>
+                      <p className="text-sm text-gray-500">หน้าแรกหลังเข้าสู่ระบบ</p>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      ภาษา
-                    </label>
-                    <select
-                      value={preferences.language}
-                      onChange={(e) => setPreferences({...preferences, language: e.target.value})}
-                      className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="th">ไทย</option>
-                      <option value="en">English</option>
-                    </select>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">หน้าแรกหลังเข้าสู่ระบบ</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { value: 'dashboard', label: 'แดชบอร์ด', icon: Activity },
+                        { value: 'contracts', label: 'สัญญา', icon: FileText },
+                        { value: 'vendors', label: 'คู่สัญญา', icon: Users }
+                      ].map(({ value, label, icon: Icon }) => (
+                        <button
+                          key={value}
+                          onClick={() => setPreferences({ ...preferences, default_page: value })}
+                          className={`flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition ${
+                            preferences.default_page === value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                          }`}
+                        >
+                          <Icon className="w-4 h-4" />
+                          <span className="font-medium text-sm">{label}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      จำนวนรายการต่อหน้า
-                    </label>
-                    <select
-                      value={preferences.items_per_page}
-                      onChange={(e) => setPreferences({...preferences, items_per_page: parseInt(e.target.value)})}
-                      className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value={10}>10</option>
-                      <option value={20}>20</option>
-                      <option value={50}>50</option>
-                      <option value={100}>100</option>
-                    </select>
-                  </div>
-
+                {/* Save */}
+                <div className="flex justify-end">
                   <button
                     onClick={handleSavePreferences}
                     disabled={saving}
-                    className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                    className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 font-medium"
                   >
                     <Save className="w-4 h-4" />
                     {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
