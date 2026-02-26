@@ -8,7 +8,8 @@ import {
   FileImage, Type, Languages, Sparkles, Sliders,
   Bot, FileStack, Copy, Plus, Trash2, Edit3, Play, Pause,
   Settings2, Workflow, Cpu, MessagesSquare, Key, Settings as SettingsIcon, Clock,
-  BookOpen, X, Users, UserPlus, UserCog, Building2, ChevronRight, ChevronDown, FolderTree, Zap
+  BookOpen, X, Users, UserPlus, UserCog, Building2, ChevronRight, ChevronDown, FolderTree, Zap,
+  HardDrive
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
@@ -833,7 +834,7 @@ function ProviderForm({
 export default function Settings() {
   const navigate = useNavigate()
   const { t, language: i18nLanguage, setLanguage: setI18nLanguage } = useI18n()
-  const [activeTab, setActiveTab] = useState<'security' | 'notifications' | 'preferences' | 'system' | 'ocr' | 'ai' | 'ai-features' | 'agents' | 'knowledge' | 'graphrag' | 'org-structure' | 'users' | 'templates'>('security')
+  const [activeTab, setActiveTab] = useState<'security' | 'notifications' | 'preferences' | 'system' | 'ocr' | 'ai' | 'ai-features' | 'agents' | 'knowledge' | 'graphrag' | 'org-structure' | 'users' | 'templates' | 'storage'>('security')
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -1962,6 +1963,15 @@ export default function Settings() {
               >
                 <Server className="w-4 h-4" />
                 <span className="text-sm font-medium">{t('settings.server_api')}</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('storage')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
+                  activeTab === 'storage' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <HardDrive className="w-4 h-4" />
+                <span className="text-sm font-medium">{t('settings.storage')}</span>
               </button>
 
               {/* Group: Management */}
@@ -4714,6 +4724,13 @@ export default function Settings() {
                 </div>
               </div>
           )}
+
+            {/* Storage Settings - พื้นที่จัดเก็บสัญญา */}
+            {activeTab === 'storage' && (
+              <div className="space-y-6">
+                <StorageSettings />
+              </div>
+            )}
           </div>
         </div>
 
@@ -4724,6 +4741,289 @@ export default function Settings() {
           />
         ) : null}
       </main>
+    </div>
+  )
+}
+
+// Storage Settings Component
+function StorageSettings() {
+  const [storageStats, setStorageStats] = useState({
+    totalSize: 0,
+    documentCount: 0,
+    bucketName: 'govplatform',
+    endpoint: 'minio:9000'
+  })
+  const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
+  const [storageConfig, setStorageConfig] = useState({
+    type: 'minio',
+    bucket: 'govplatform',
+    endpoint: 'minio:9000',
+    accessKey: '',
+    secretKey: ''
+  })
+  const [showKeys, setShowKeys] = useState(false)
+  const [retentionDays, setRetentionDays] = useState(2555) // 7 years default
+  const [autoCleanup, setAutoCleanup] = useState(false)
+
+  useEffect(() => {
+    fetchStorageStats()
+  }, [])
+
+  const fetchStorageStats = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/v1/admin/storage/stats')
+      if (response.ok) {
+        const data = await response.json()
+        setStorageStats(data)
+      }
+    } catch (err) {
+      console.error('Failed to fetch storage stats:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSaveConfig = async () => {
+    try {
+      const response = await fetch('/api/v1/admin/storage/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(storageConfig)
+      })
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'บันทึกการตั้งค่าพื้นที่จัดเก็บสำเร็จ' })
+      } else {
+        setMessage({ type: 'error', text: 'ไม่สามารถบันทึกการตั้งค่าได้' })
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' })
+    }
+  }
+
+  const handleTestConnection = async () => {
+    try {
+      const response = await fetch('/api/v1/admin/storage/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(storageConfig)
+      })
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'ทดสอบการเชื่อมต่อสำเร็จ' })
+      } else {
+        setMessage({ type: 'error', text: 'ไม่สามารถเชื่อมต่อได้' })
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' })
+    }
+  }
+
+  const formatSize = (bytes: number) => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Storage Overview */}
+      <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <HardDrive className="w-6 h-6 text-blue-600" />
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">พื้นที่จัดเก็บสัญญา</h2>
+            <p className="text-sm text-gray-500">จัดการการตั้งค่าและดูสถิติการใช้งานพื้นที่จัดเก็บ</p>
+          </div>
+        </div>
+
+        {message && (
+          <div className={`mb-4 p-3 rounded-lg flex items-center gap-2 ${
+            message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+          }`}>
+            {message.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+            {message.text}
+          </div>
+        )}
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+            <p className="text-sm text-gray-600 mb-1">พื้นที่ใช้งานทั้งหมด</p>
+            <p className="text-2xl font-bold text-blue-700">{loading ? '...' : formatSize(storageStats.totalSize)}</p>
+          </div>
+          <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+            <p className="text-sm text-gray-600 mb-1">จำนวนเอกสาร</p>
+            <p className="text-2xl font-bold text-green-700">{loading ? '...' : storageStats.documentCount.toLocaleString()}</p>
+          </div>
+          <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+            <p className="text-sm text-gray-600 mb-1">Bucket</p>
+            <p className="text-lg font-bold text-purple-700">{storageStats.bucketName}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Storage Configuration */}
+      <div className="bg-white rounded-xl shadow-sm border p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <Server className="w-5 h-5 text-gray-600" />
+          ตั้งค่าการเชื่อมต่อ
+        </h3>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">ประเภท Storage</label>
+              <select
+                value={storageConfig.type}
+                onChange={(e) => setStorageConfig({...storageConfig, type: e.target.value})}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="minio">MinIO (Local)</option>
+                <option value="s3">Amazon S3</option>
+                <option value="gcs">Google Cloud Storage</option>
+                <option value="azure">Azure Blob Storage</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Bucket Name</label>
+              <input
+                type="text"
+                value={storageConfig.bucket}
+                onChange={(e) => setStorageConfig({...storageConfig, bucket: e.target.value})}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Endpoint URL</label>
+            <input
+              type="text"
+              value={storageConfig.endpoint}
+              onChange={(e) => setStorageConfig({...storageConfig, endpoint: e.target.value})}
+              placeholder="minio:9000 หรือ s3.amazonaws.com"
+              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Access Key</label>
+              <div className="relative">
+                <input
+                  type={showKeys ? 'text' : 'password'}
+                  value={storageConfig.accessKey}
+                  onChange={(e) => setStorageConfig({...storageConfig, accessKey: e.target.value})}
+                  className="w-full px-4 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Secret Key</label>
+              <div className="relative">
+                <input
+                  type={showKeys ? 'text' : 'password'}
+                  value={storageConfig.secretKey}
+                  onChange={(e) => setStorageConfig({...storageConfig, secretKey: e.target.value})}
+                  className="w-full px-4 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="showKeys"
+              checked={showKeys}
+              onChange={(e) => setShowKeys(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded"
+            />
+            <label htmlFor="showKeys" className="text-sm text-gray-700">แสดง API Keys</label>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={handleTestConnection}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
+            >
+              <Activity className="w-4 h-4" />
+              ทดสอบการเชื่อมต่อ
+            </button>
+            <button
+              onClick={handleSaveConfig}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              <Save className="w-4 h-4" />
+              บันทึกการตั้งค่า
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Retention Policy */}
+      <div className="bg-white rounded-xl shadow-sm border p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <Clock className="w-5 h-5 text-gray-600" />
+          นโยบายการเก็บรักษาเอกสาร
+        </h3>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">เก็บเอกสารตามกำหนดเวลา</p>
+              <p className="text-sm text-gray-500">ลบเอกสารที่เกินระยะเวลาที่กำหนดโดยอัตโนมัติ</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoCleanup}
+                onChange={(e) => setAutoCleanup(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              ระยะเวลาเก็บรักษา (วัน): <span className="text-blue-600 font-bold">{retentionDays} วัน</span>
+              <span className="text-gray-500 ml-2">({Math.floor(retentionDays / 365)} ปี)</span>
+            </label>
+            <input
+              type="range"
+              min="365"
+              max="3650"
+              step="365"
+              value={retentionDays}
+              onChange={(e) => setRetentionDays(parseInt(e.target.value))}
+              className="w-full"
+            />
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>1 ปี</span>
+              <span>5 ปี</span>
+              <span>10 ปี</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Storage Tips */}
+      <div className="bg-amber-50 rounded-xl border border-amber-200 p-6">
+        <h3 className="text-sm font-semibold text-amber-800 mb-2 flex items-center gap-2">
+          <Info className="w-4 h-4" />
+          คำแนะนำ
+        </h3>
+        <ul className="text-sm text-amber-700 space-y-1 list-disc list-inside">
+          <li>เอกสารสัญญาทั้งหมดจะถูกเข้ารหัส (encrypted) ก่อนจัดเก็บ</li>
+          <li>ควรสำรองข้อมูล (backup) เป็นประจำทุกวัน</li>
+          <li>ตรวจสอบพื้นที่ใช้งานอย่างสม่ำเสมอเพื่อป้องกันพื้นที่เต็ม</li>
+          <li>หากเปลี่ยนการตั้งค่า Storage ต้อง restart ระบบเพื่อให้มีผล</li>
+        </ul>
+      </div>
     </div>
   )
 }
