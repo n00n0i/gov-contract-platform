@@ -41,6 +41,14 @@ import TriggerManagement from '../components/TriggerManagement'
 import TriggerPresetSelector from '../components/TriggerPresetSelector'
 import GraphVisualization from '../components/GraphVisualization'
 import CreateTemplate from '../components/CreateTemplate'
+import {
+  getOrgStats, getOrgTree, getPositions, createOrgUnit, createPosition,
+  orgLevelLabels, careerTrackLabels, type OrgUnit, type Position as OrgPosition
+} from '../services/organizationService'
+import {
+  listUsers, getUserStats, listRoles, createUser, deactivateUser,
+  type UserItem, type UserStats, type RoleItem
+} from '../services/userService'
 
 const api = axios.create({
   baseURL: '/api/v1'
@@ -1030,12 +1038,40 @@ export default function Settings() {
   const [entitySearchResults, setEntitySearchResults] = useState<any[]>([])
   const [entitySearchLoading, setEntitySearchLoading] = useState(false)
 
+  // Organization Structure State
+  const [orgStats, setOrgStats] = useState({ total_units: 0, total_positions: 0, users_with_org_assignment: 0, units_by_level: {} as Record<string, number> })
+  const [orgTree, setOrgTree] = useState<OrgUnit[]>([])
+  const [orgPositions, setOrgPositions] = useState<OrgPosition[]>([])
+  const [orgLoading, setOrgLoading] = useState(false)
+  const [showOrgUnitForm, setShowOrgUnitForm] = useState(false)
+  const [newOrgUnitForm, setNewOrgUnitForm] = useState({ code: '', name_th: '', name_en: '', level: 'bureau' as string, parent_id: '' })
+  const [showPositionForm, setShowPositionForm] = useState(false)
+  const [newPositionForm, setNewPositionForm] = useState({ code: '', name_th: '', name_en: '', level: 3, position_type: 'permanent', career_track: 'support', is_management: false })
+
+  // User Management State
+  const [userList, setUserList] = useState<UserItem[]>([])
+  const [userStats, setUserStats] = useState<UserStats>({ total: 0, active: 0, pending: 0, suspended: 0, inactive: 0 })
+  const [userRoles, setUserRoles] = useState<RoleItem[]>([])
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [showUserForm, setShowUserForm] = useState(false)
+  const [newUserForm, setNewUserForm] = useState({ username: '', email: '', password: '', first_name: '', last_name: '', title: '', role_ids: [] as string[] })
+
+  // Profile form
+  const [profileForm, setProfileForm] = useState({ first_name: '', last_name: '', title: '', phone: '' })
+  const [profileSaving, setProfileSaving] = useState(false)
+
   // Load Templates and Agents
   useEffect(() => {
     fetchTemplates()
     fetchAgents()
     fetchTemplateTypes()
   }, [])
+
+  // Load org/user data when tab becomes active
+  useEffect(() => {
+    if (activeTab === 'org-structure') fetchOrgData()
+    if (activeTab === 'users') fetchUsers()
+  }, [activeTab])
 
   const fetchTemplates = async () => {
     try {
@@ -1277,6 +1313,14 @@ export default function Settings() {
     try {
       const response = await api.get('/auth/me')
       setUser(response.data)
+      if (response.data) {
+        setProfileForm({
+          first_name: response.data.first_name || '',
+          last_name: response.data.last_name || '',
+          title: response.data.title || '',
+          phone: response.data.phone || ''
+        })
+      }
     } catch (err) {
       console.error('Failed to fetch user:', err)
     } finally {
@@ -1375,6 +1419,123 @@ export default function Settings() {
       setEntitySearchResults([])
     } finally {
       setEntitySearchLoading(false)
+    }
+  }
+
+  const fetchOrgData = async () => {
+    setOrgLoading(true)
+    try {
+      const [statsRes, treeRes, posRes] = await Promise.allSettled([
+        getOrgStats(),
+        getOrgTree(),
+        getPositions()
+      ])
+      if (statsRes.status === 'fulfilled') setOrgStats(statsRes.value)
+      if (treeRes.status === 'fulfilled') setOrgTree(Array.isArray(treeRes.value) ? treeRes.value : [])
+      if (posRes.status === 'fulfilled') setOrgPositions(Array.isArray(posRes.value) ? posRes.value : [])
+    } catch (err) {
+      console.error('Failed to fetch org data:', err)
+    } finally {
+      setOrgLoading(false)
+    }
+  }
+
+  const fetchUsers = async () => {
+    setUsersLoading(true)
+    try {
+      const [usersRes, statsRes, rolesRes] = await Promise.allSettled([
+        listUsers({ limit: 100 }),
+        getUserStats(),
+        listRoles()
+      ])
+      if (usersRes.status === 'fulfilled') setUserList(usersRes.value.data || [])
+      if (statsRes.status === 'fulfilled') setUserStats(statsRes.value)
+      if (rolesRes.status === 'fulfilled') setUserRoles(rolesRes.value || [])
+    } catch (err) {
+      console.error('Failed to fetch users:', err)
+    } finally {
+      setUsersLoading(false)
+    }
+  }
+
+  const handleSaveProfile = async () => {
+    setProfileSaving(true)
+    try {
+      await api.put('/auth/me', profileForm)
+      setMessage({ type: 'success', text: 'บันทึกข้อมูลส่วนตัวสำเร็จ' })
+      fetchUser()
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถบันทึกข้อมูลได้' })
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
+  const handleCreateOrgUnit = async () => {
+    if (!newOrgUnitForm.code || !newOrgUnitForm.name_th) {
+      setMessage({ type: 'error', text: 'กรุณากรอกรหัสและชื่อหน่วยงาน' })
+      return
+    }
+    setSaving(true)
+    try {
+      await createOrgUnit({ ...newOrgUnitForm, unit_type: 'government' } as any)
+      setShowOrgUnitForm(false)
+      setNewOrgUnitForm({ code: '', name_th: '', name_en: '', level: 'bureau', parent_id: '' })
+      await fetchOrgData()
+      setMessage({ type: 'success', text: 'เพิ่มหน่วยงานสำเร็จ' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถเพิ่มหน่วยงานได้' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreatePosition = async () => {
+    if (!newPositionForm.code || !newPositionForm.name_th) {
+      setMessage({ type: 'error', text: 'กรุณากรอกรหัสและชื่อตำแหน่ง' })
+      return
+    }
+    setSaving(true)
+    try {
+      await createPosition(newPositionForm as any)
+      setShowPositionForm(false)
+      setNewPositionForm({ code: '', name_th: '', name_en: '', level: 3, position_type: 'permanent', career_track: 'support', is_management: false })
+      await fetchOrgData()
+      setMessage({ type: 'success', text: 'เพิ่มตำแหน่งสำเร็จ' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถเพิ่มตำแหน่งได้' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreateUser = async () => {
+    if (!newUserForm.username || !newUserForm.email || !newUserForm.password) {
+      setMessage({ type: 'error', text: 'กรุณากรอกชื่อผู้ใช้ อีเมล และรหัสผ่าน' })
+      return
+    }
+    setSaving(true)
+    try {
+      await createUser(newUserForm)
+      setShowUserForm(false)
+      setNewUserForm({ username: '', email: '', password: '', first_name: '', last_name: '', title: '', role_ids: [] })
+      await fetchUsers()
+      setMessage({ type: 'success', text: 'สร้างผู้ใช้สำเร็จ' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถสร้างผู้ใช้ได้' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeactivateUser = async (id: string, username: string) => {
+    if (!confirm(`ยืนยันการระงับบัญชี "${username}"?`)) return
+    try {
+      await deactivateUser(id)
+      await fetchUsers()
+      setMessage({ type: 'success', text: 'ระงับผู้ใช้สำเร็จ' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถระงับผู้ใช้ได้' })
     }
   }
 
@@ -1719,6 +1880,64 @@ export default function Settings() {
             {/* Security Settings */}
             {activeTab === 'security' && (
               <div className="space-y-6">
+                {/* Profile */}
+                <div className="bg-white rounded-xl shadow-sm border p-6">
+                  <div className="flex items-center gap-3 mb-6">
+                    <User className="w-6 h-6 text-blue-600" />
+                    <h2 className="text-lg font-semibold text-gray-900">ข้อมูลส่วนตัว</h2>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">ชื่อ</label>
+                      <input
+                        type="text"
+                        value={profileForm.first_name}
+                        onChange={(e) => setProfileForm({ ...profileForm, first_name: e.target.value })}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="ชื่อ"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">นามสกุล</label>
+                      <input
+                        type="text"
+                        value={profileForm.last_name}
+                        onChange={(e) => setProfileForm({ ...profileForm, last_name: e.target.value })}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="นามสกุล"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">ตำแหน่ง</label>
+                      <input
+                        type="text"
+                        value={profileForm.title}
+                        onChange={(e) => setProfileForm({ ...profileForm, title: e.target.value })}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="ตำแหน่งงาน"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">เบอร์โทรศัพท์</label>
+                      <input
+                        type="text"
+                        value={profileForm.phone}
+                        onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="เบอร์โทรศัพท์"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleSaveProfile}
+                    disabled={profileSaving}
+                    className="mt-4 flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    {profileSaving ? 'กำลังบันทึก...' : 'บันทึกข้อมูลส่วนตัว'}
+                  </button>
+                </div>
+
                 {/* Change Password */}
                 <div className="bg-white rounded-xl shadow-sm border p-6">
                   <div className="flex items-center gap-3 mb-6">
@@ -3659,20 +3878,20 @@ export default function Settings() {
                 {/* Stats */}
                 <div className="grid grid-cols-4 gap-4">
                   <div className="p-4 bg-blue-50 rounded-lg text-center">
-                    <p className="text-2xl font-bold text-blue-600">0</p>
-                    <p className="text-sm text-blue-600/70">หน่วยงาน</p>
+                    {orgLoading ? <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" /> : <p className="text-2xl font-bold text-blue-600">{orgStats.total_units}</p>}
+                    <p className="text-sm text-blue-600/70 mt-1">หน่วยงาน</p>
                   </div>
                   <div className="p-4 bg-green-50 rounded-lg text-center">
-                    <p className="text-2xl font-bold text-green-600">0</p>
-                    <p className="text-sm text-green-600/70">ตำแหน่ง</p>
+                    {orgLoading ? <div className="w-6 h-6 border-2 border-green-400 border-t-transparent rounded-full animate-spin mx-auto" /> : <p className="text-2xl font-bold text-green-600">{orgStats.total_positions}</p>}
+                    <p className="text-sm text-green-600/70 mt-1">ตำแหน่ง</p>
                   </div>
                   <div className="p-4 bg-purple-50 rounded-lg text-center">
-                    <p className="text-2xl font-bold text-purple-600">0</p>
-                    <p className="text-sm text-purple-600/70">ผู้ใช้ในหน่วยงาน</p>
+                    {orgLoading ? <div className="w-6 h-6 border-2 border-purple-400 border-t-transparent rounded-full animate-spin mx-auto" /> : <p className="text-2xl font-bold text-purple-600">{orgStats.users_with_org_assignment}</p>}
+                    <p className="text-sm text-purple-600/70 mt-1">ผู้ใช้ในหน่วยงาน</p>
                   </div>
                   <div className="p-4 bg-orange-50 rounded-lg text-center">
-                    <p className="text-2xl font-bold text-orange-600">0</p>
-                    <p className="text-sm text-orange-600/70">ระดับ</p>
+                    {orgLoading ? <div className="w-6 h-6 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto" /> : <p className="text-2xl font-bold text-orange-600">{Object.keys(orgStats.units_by_level).length}</p>}
+                    <p className="text-sm text-orange-600/70 mt-1">ระดับ</p>
                   </div>
                 </div>
 
@@ -3686,49 +3905,104 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">กระทรวง &gt; กรม &gt; สำนัก/กอง &gt; งาน/ฝ่าย</p>
                       </div>
                     </div>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    <button
+                      onClick={() => setShowOrgUnitForm(!showOrgUnitForm)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                    >
                       <Plus className="w-4 h-4" />
                       เพิ่มหน่วยงาน
                     </button>
                   </div>
 
+                  {/* Add unit form */}
+                  {showOrgUnitForm && (
+                    <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <h4 className="font-medium text-gray-900 mb-3">เพิ่มหน่วยงานใหม่</h4>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">รหัสหน่วยงาน *</label>
+                          <input type="text" value={newOrgUnitForm.code} onChange={(e) => setNewOrgUnitForm({ ...newOrgUnitForm, code: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="เช่น DEPT001" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อ (ไทย) *</label>
+                          <input type="text" value={newOrgUnitForm.name_th} onChange={(e) => setNewOrgUnitForm({ ...newOrgUnitForm, name_th: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="ชื่อหน่วยงาน" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อ (อังกฤษ)</label>
+                          <input type="text" value={newOrgUnitForm.name_en} onChange={(e) => setNewOrgUnitForm({ ...newOrgUnitForm, name_en: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="Department Name" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">ระดับ</label>
+                          <select value={newOrgUnitForm.level} onChange={(e) => setNewOrgUnitForm({ ...newOrgUnitForm, level: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                            {Object.entries(orgLevelLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button onClick={handleCreateOrgUnit} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                          {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+                        </button>
+                        <button onClick={() => setShowOrgUnitForm(false)} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">ยกเลิก</button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Tree View */}
-                  <div className="border rounded-lg p-4">
-                    <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
-                      <Building2 className="w-5 h-5 text-blue-600" />
-                      <span className="font-medium text-gray-900">ยังไม่มีข้อมูลโครงสร้างองค์กร</span>
-                    </div>
-                    <div className="mt-4 text-center text-gray-500">
-                      <p>เริ่มต้นโดยการเพิ่มหน่วยงานระดับบน (กระทรวง/สำนักงาน)</p>
-                    </div>
+                  <div className="border rounded-lg p-4 max-h-96 overflow-y-auto">
+                    {orgLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mr-2" />
+                        <span className="text-gray-500">กำลังโหลด...</span>
+                      </div>
+                    ) : orgTree.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <Building2 className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                        <p>ยังไม่มีข้อมูลโครงสร้างองค์กร</p>
+                        <p className="text-sm mt-1">เริ่มต้นโดยการเพิ่มหน่วยงานระดับบน (กระทรวง/สำนักงาน)</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {orgTree.map((node) => {
+                          const renderNode = (n: any, depth: number): React.ReactNode => {
+                            const levelColorMap: Record<string, string> = {
+                              ministry: 'border-purple-200 bg-purple-50 text-purple-700',
+                              department: 'border-blue-200 bg-blue-50 text-blue-700',
+                              bureau: 'border-green-200 bg-green-50 text-green-700',
+                              division: 'border-yellow-200 bg-yellow-50 text-yellow-700',
+                              section: 'border-orange-200 bg-orange-50 text-orange-700',
+                              unit: 'border-gray-200 bg-gray-50 text-gray-700',
+                            }
+                            const color = levelColorMap[n.level] || 'border-gray-200 bg-gray-50 text-gray-700'
+                            return (
+                              <div key={n.id} style={{ marginLeft: `${depth * 20}px` }}>
+                                <div className={`flex items-center gap-2 p-2 rounded-lg border ${color} mb-1`}>
+                                  {n.children?.length > 0 ? <ChevronDown className="w-3 h-3 flex-shrink-0" /> : <ChevronRight className="w-3 h-3 flex-shrink-0 opacity-0" />}
+                                  <Building2 className="w-4 h-4 flex-shrink-0" />
+                                  <span className="font-medium text-sm flex-1">{n.name_th}</span>
+                                  <span className="text-xs px-2 py-0.5 bg-white/70 rounded-full border">{orgLevelLabels[n.level] || n.level}</span>
+                                  <span className="text-xs opacity-70">{n.user_count} คน</span>
+                                </div>
+                                {n.children?.map((child: any) => renderNode(child, depth + 1))}
+                              </div>
+                            )
+                          }
+                          return renderNode(node, 0)
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Level Legend */}
-                  <div className="mt-6 flex flex-wrap gap-4 text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-purple-600 rounded"></div>
-                      <span className="text-gray-600">กระทรวง</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-blue-600 rounded"></div>
-                      <span className="text-gray-600">กรม/สำนักงาน</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-green-600 rounded"></div>
-                      <span className="text-gray-600">สำนัก/กอง</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-yellow-600 rounded"></div>
-                      <span className="text-gray-600">งาน/ฝ่าย</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-orange-600 rounded"></div>
-                      <span className="text-gray-600">กลุ่ม/หมวด</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 bg-gray-600 rounded"></div>
-                      <span className="text-gray-600">หน่วยย่อย</span>
-                    </div>
+                  <div className="mt-4 flex flex-wrap gap-3 text-xs">
+                    {Object.entries(orgLevelLabels).map(([level, label]) => {
+                      const dotColors: Record<string, string> = { ministry: 'bg-purple-600', department: 'bg-blue-600', bureau: 'bg-green-600', division: 'bg-yellow-600', section: 'bg-orange-600', unit: 'bg-gray-600' }
+                      return (
+                        <div key={level} className="flex items-center gap-1.5">
+                          <div className={`w-2.5 h-2.5 rounded ${dotColors[level] || 'bg-gray-600'}`}></div>
+                          <span className="text-gray-600">{label}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
 
@@ -3742,11 +4016,53 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">จัดการตำแหน่งในองค์กร</p>
                       </div>
                     </div>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    <button
+                      onClick={() => setShowPositionForm(!showPositionForm)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                    >
                       <Plus className="w-4 h-4" />
                       เพิ่มตำแหน่ง
                     </button>
                   </div>
+
+                  {/* Add position form */}
+                  {showPositionForm && (
+                    <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <h4 className="font-medium text-gray-900 mb-3">เพิ่มตำแหน่งใหม่</h4>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">รหัสตำแหน่ง *</label>
+                          <input type="text" value={newPositionForm.code} onChange={(e) => setNewPositionForm({ ...newPositionForm, code: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="เช่น POS001" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อตำแหน่ง (ไทย) *</label>
+                          <input type="text" value={newPositionForm.name_th} onChange={(e) => setNewPositionForm({ ...newPositionForm, name_th: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="ชื่อตำแหน่ง" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">สายงาน</label>
+                          <select value={newPositionForm.career_track} onChange={(e) => setNewPositionForm({ ...newPositionForm, career_track: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                            {Object.entries(careerTrackLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">ระดับ (1-10)</label>
+                          <input type="number" min={1} max={10} value={newPositionForm.level} onChange={(e) => setNewPositionForm({ ...newPositionForm, level: parseInt(e.target.value) || 3 })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 mt-3">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={newPositionForm.is_management} onChange={(e) => setNewPositionForm({ ...newPositionForm, is_management: e.target.checked })} className="w-4 h-4 rounded" />
+                          ตำแหน่งบริหาร
+                        </label>
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button onClick={handleCreatePosition} disabled={saving} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
+                          {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+                        </button>
+                        <button onClick={() => setShowPositionForm(false)} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">ยกเลิก</button>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="overflow-x-auto">
                     <table className="w-full">
@@ -3757,15 +4073,35 @@ export default function Settings() {
                           <th className="text-left py-3 px-4 font-medium text-gray-700">ระดับ</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">สังกัด</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">สายงาน</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">จัดการ</th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-700">ผู้ใช้</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr className="border-b">
-                          <td className="py-4 px-4 text-gray-500" colSpan={6}>
-                            ยังไม่มีข้อมูลตำแหน่ง
-                          </td>
-                        </tr>
+                        {orgLoading ? (
+                          <tr><td colSpan={6} className="py-8 text-center text-gray-400">กำลังโหลด...</td></tr>
+                        ) : orgPositions.length === 0 ? (
+                          <tr><td colSpan={6} className="py-8 text-center text-gray-400">ยังไม่มีข้อมูลตำแหน่ง</td></tr>
+                        ) : (
+                          orgPositions.map((pos) => (
+                            <tr key={pos.id} className="border-b hover:bg-gray-50">
+                              <td className="py-3 px-4 font-mono text-sm text-gray-600">{pos.code}</td>
+                              <td className="py-3 px-4">
+                                <p className="font-medium text-gray-900">{pos.name_th}</p>
+                                {pos.name_en && <p className="text-xs text-gray-500">{pos.name_en}</p>}
+                              </td>
+                              <td className="py-3 px-4 text-gray-600">{pos.level}</td>
+                              <td className="py-3 px-4 text-gray-600">{pos.org_unit_name || '-'}</td>
+                              <td className="py-3 px-4">
+                                {pos.career_track ? (
+                                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
+                                    {careerTrackLabels[pos.career_track] || pos.career_track}
+                                  </span>
+                                ) : '-'}
+                              </td>
+                              <td className="py-3 px-4 text-gray-600">{pos.user_count}</td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -3785,29 +4121,94 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">จัดการบัญชีผู้ใช้และสิทธิ์การใช้งาน</p>
                       </div>
                     </div>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    <button
+                      onClick={() => setShowUserForm(!showUserForm)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                    >
                       <UserPlus className="w-4 h-4" />
                       เพิ่มผู้ใช้
                     </button>
                   </div>
 
+                  {/* Add user form */}
+                  {showUserForm && (
+                    <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <h4 className="font-medium text-gray-900 mb-3">เพิ่มผู้ใช้ใหม่</h4>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อผู้ใช้ *</label>
+                          <input type="text" value={newUserForm.username} onChange={(e) => setNewUserForm({ ...newUserForm, username: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="username" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">อีเมล *</label>
+                          <input type="email" value={newUserForm.email} onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="email@gov.th" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">รหัสผ่าน *</label>
+                          <input type="password" value={newUserForm.password} onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="อย่างน้อย 8 ตัว" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อ</label>
+                          <input type="text" value={newUserForm.first_name} onChange={(e) => setNewUserForm({ ...newUserForm, first_name: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="ชื่อ" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">นามสกุล</label>
+                          <input type="text" value={newUserForm.last_name} onChange={(e) => setNewUserForm({ ...newUserForm, last_name: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="นามสกุล" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">ตำแหน่ง</label>
+                          <input type="text" value={newUserForm.title} onChange={(e) => setNewUserForm({ ...newUserForm, title: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="ตำแหน่งงาน" />
+                        </div>
+                        {userRoles.length > 0 && (
+                          <div className="col-span-2">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">บทบาท</label>
+                            <div className="flex flex-wrap gap-2">
+                              {userRoles.map((role) => (
+                                <label key={role.id} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={newUserForm.role_ids.includes(role.id)}
+                                    onChange={(e) => {
+                                      const ids = e.target.checked
+                                        ? [...newUserForm.role_ids, role.id]
+                                        : newUserForm.role_ids.filter(id => id !== role.id)
+                                      setNewUserForm({ ...newUserForm, role_ids: ids })
+                                    }}
+                                    className="w-3.5 h-3.5 rounded"
+                                  />
+                                  {role.name}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button onClick={handleCreateUser} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                          {saving ? 'กำลังบันทึก...' : 'สร้างผู้ใช้'}
+                        </button>
+                        <button onClick={() => setShowUserForm(false)} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">ยกเลิก</button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* User Stats */}
                   <div className="grid grid-cols-4 gap-4 mb-6">
                     <div className="p-4 bg-blue-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-blue-600">1</p>
-                      <p className="text-sm text-blue-600/70">ผู้ใช้ทั้งหมด</p>
+                      {usersLoading ? <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" /> : <p className="text-2xl font-bold text-blue-600">{userStats.total}</p>}
+                      <p className="text-sm text-blue-600/70 mt-1">ผู้ใช้ทั้งหมด</p>
                     </div>
                     <div className="p-4 bg-green-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-green-600">1</p>
-                      <p className="text-sm text-green-600/70">กำลังใช้งาน</p>
+                      {usersLoading ? <div className="w-6 h-6 border-2 border-green-400 border-t-transparent rounded-full animate-spin mx-auto" /> : <p className="text-2xl font-bold text-green-600">{userStats.active}</p>}
+                      <p className="text-sm text-green-600/70 mt-1">กำลังใช้งาน</p>
                     </div>
                     <div className="p-4 bg-yellow-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-yellow-600">0</p>
-                      <p className="text-sm text-yellow-600/70">รอการยืนยัน</p>
+                      {usersLoading ? <div className="w-6 h-6 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto" /> : <p className="text-2xl font-bold text-yellow-600">{userStats.pending}</p>}
+                      <p className="text-sm text-yellow-600/70 mt-1">รอการยืนยัน</p>
                     </div>
                     <div className="p-4 bg-red-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-red-600">0</p>
-                      <p className="text-sm text-red-600/70">ถูกระงับ</p>
+                      {usersLoading ? <div className="w-6 h-6 border-2 border-red-400 border-t-transparent rounded-full animate-spin mx-auto" /> : <p className="text-2xl font-bold text-red-600">{userStats.suspended}</p>}
+                      <p className="text-sm text-red-600/70 mt-1">ถูกระงับ</p>
                     </div>
                   </div>
 
@@ -3820,43 +4221,80 @@ export default function Settings() {
                           <th className="text-left py-3 px-4 font-medium text-gray-700">ตำแหน่ง</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">สิทธิ์</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">สถานะ</th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-700">เข้าสู่ระบบล่าสุด</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">จัดการ</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr className="border-b hover:bg-gray-50">
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                                <User className="w-5 h-5 text-blue-600" />
-                              </div>
-                              <div>
-                                <p className="font-medium text-gray-900">admin</p>
-                                <p className="text-sm text-gray-500">admin@gov.th</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-gray-600">ผู้ดูแลระบบ</td>
-                          <td className="py-3 px-4">
-                            <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">Super Admin</span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className="flex items-center gap-1.5">
-                              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                              <span className="text-sm text-gray-600">ใช้งาน</span>
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <button className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition" title="แก้ไข">
-                                <Edit3 className="w-4 h-4" />
-                              </button>
-                              <button className="p-2 hover:bg-red-50 text-red-600 rounded-lg transition" title="ลบ">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
+                        {usersLoading ? (
+                          <tr><td colSpan={6} className="py-8 text-center text-gray-400">กำลังโหลด...</td></tr>
+                        ) : userList.length === 0 ? (
+                          <tr><td colSpan={6} className="py-8 text-center text-gray-400">ยังไม่มีผู้ใช้ในระบบ</td></tr>
+                        ) : (
+                          userList.map((u) => (
+                            <tr key={u.id} className="border-b hover:bg-gray-50">
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <User className="w-4 h-4 text-blue-600" />
+                                  </div>
+                                  <div>
+                                    <p className="font-medium text-gray-900">{u.full_name || u.username}</p>
+                                    <p className="text-xs text-gray-500">{u.email}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-gray-600 text-sm">{u.title || u.department || '-'}</td>
+                              <td className="py-3 px-4">
+                                <div className="flex flex-wrap gap-1">
+                                  {u.is_superuser ? (
+                                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">Super Admin</span>
+                                  ) : u.role_names?.length > 0 ? (
+                                    u.role_names.map((rn, i) => (
+                                      <span key={i} className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">{rn}</span>
+                                    ))
+                                  ) : (
+                                    <span className="text-xs text-gray-400">ไม่มีบทบาท</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                {u.status === 'active' ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                                    <span className="text-sm text-gray-600">ใช้งาน</span>
+                                  </span>
+                                ) : u.status === 'inactive' ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 bg-gray-400 rounded-full"></span>
+                                    <span className="text-sm text-gray-500">ระงับ</span>
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                                    <span className="text-sm text-gray-500">{u.status}</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-xs text-gray-500">
+                                {u.last_login_at ? new Date(u.last_login_at).toLocaleDateString('th-TH') : '-'}
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-1">
+                                  {u.status === 'active' && (
+                                    <button
+                                      onClick={() => handleDeactivateUser(u.id, u.username)}
+                                      className="p-1.5 hover:bg-red-50 text-red-600 rounded-lg transition"
+                                      title="ระงับผู้ใช้"
+                                    >
+                                      <XCircle className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -3866,34 +4304,28 @@ export default function Settings() {
                 <div className="bg-white rounded-xl shadow-sm border p-6">
                   <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
                     <UserCog className="w-5 h-5" />
-                    จัดการบทบาท (Roles)
+                    บทบาทในระบบ (Roles)
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-4 border rounded-lg">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Shield className="w-5 h-5 text-purple-600" />
-                        <h4 className="font-medium text-gray-900">Super Admin</h4>
-                      </div>
-                      <p className="text-sm text-gray-500 mb-3">เข้าถึงทุกฟังก์ชันในระบบ</p>
-                      <p className="text-xs text-gray-400">1 ผู้ใช้</p>
+                  {usersLoading ? (
+                    <div className="text-center py-4 text-gray-400">กำลังโหลด...</div>
+                  ) : userRoles.length === 0 ? (
+                    <div className="text-center py-4 text-gray-400">ยังไม่มีข้อมูลบทบาท</div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {userRoles.map((role) => (
+                        <div key={role.id} className="p-4 border rounded-lg hover:border-blue-300 transition">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Shield className="w-5 h-5 text-blue-600" />
+                            <h4 className="font-medium text-gray-900">{role.name}</h4>
+                            {role.is_system && <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">ระบบ</span>}
+                          </div>
+                          <p className="text-sm text-gray-500 mb-2">{role.description || '-'}</p>
+                          <p className="text-xs text-gray-400">{role.user_count} ผู้ใช้</p>
+                          <p className="text-xs text-gray-400 mt-1">{role.permissions.length} สิทธิ์</p>
+                        </div>
+                      ))}
                     </div>
-                    <div className="p-4 border rounded-lg">
-                      <div className="flex items-center gap-2 mb-2">
-                        <UserCog className="w-5 h-5 text-blue-600" />
-                        <h4 className="font-medium text-gray-900">Contract Manager</h4>
-                      </div>
-                      <p className="text-sm text-gray-500 mb-3">จัดการสัญญาและเอกสาร</p>
-                      <p className="text-xs text-gray-400">0 ผู้ใช้</p>
-                    </div>
-                    <div className="p-4 border rounded-lg">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Eye className="w-5 h-5 text-green-600" />
-                        <h4 className="font-medium text-gray-900">Viewer</h4>
-                      </div>
-                      <p className="text-sm text-gray-500 mb-3">ดูข้อมูลได้อย่างเดียว</p>
-                      <p className="text-xs text-gray-400">0 ผู้ใช้</p>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
             )}

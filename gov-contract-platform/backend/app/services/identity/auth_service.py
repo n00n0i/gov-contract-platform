@@ -56,7 +56,7 @@ class AuthService:
             )
         
         # Update last login
-        user.last_login = datetime.utcnow()
+        user.last_login_at = datetime.utcnow()
         self.db.commit()
         
         # Get user permissions
