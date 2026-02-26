@@ -7,34 +7,27 @@
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
-  
-  /* Light mode colors */
-  --bg-primary: #ffffff;
-  --bg-secondary: #f1f5f9;
-  --bg-card: #ffffff;
-  --text-primary: #1f2937;
-  --text-secondary: #6b7280;
-  --border-color: #e5e7eb;
 }
 
-/* Dark mode colors */
+/* Dark mode - ใช้ Tailwind dark: classes */
 html.dark {
-  --bg-primary: #111827;
-  --bg-secondary: #1f2937;
-  --bg-card: #374151;
-  --text-primary: #f9fafb;
-  --text-secondary: #d1d5db;
-  --border-color: #4b5563;
+  color-scheme: dark;
 }
 
 html.dark body {
-  background-color: var(--bg-secondary);
-  color: var(--text-primary);
+  background-color: #111827;
+  color: #f9fafb;
 }
 
 body {
   font-family: 'Inter', 'Sarabun', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: var(--bg-secondary);
-  color: var(--text-primary);
+  background-color: #f1f5f9;
+  color: #1f2937;
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Override for Tailwind v4 dark mode */
+.dark body {
+  background-color: #111827;
+  color: #f9fafb;
 }

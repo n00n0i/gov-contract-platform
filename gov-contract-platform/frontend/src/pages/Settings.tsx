@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
+import { useI18n } from '../i18n'
 import {
   getNotificationSettings, saveNotificationSettings,
   getPreferences, savePreferences,
@@ -831,6 +832,7 @@ function ProviderForm({
 
 export default function Settings() {
   const navigate = useNavigate()
+  const { t, language: i18nLanguage, setLanguage: setI18nLanguage } = useI18n()
   const [activeTab, setActiveTab] = useState<'security' | 'notifications' | 'preferences' | 'system' | 'ocr' | 'ai' | 'ai-features' | 'agents' | 'knowledge' | 'graphrag' | 'org-structure' | 'users' | 'templates'>('security')
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -1810,8 +1812,8 @@ export default function Settings() {
           <div className="md:col-span-1">
             <nav className="space-y-0.5">
 
-              {/* Group: ส่วนตัว */}
-              <p className="px-3 pt-2 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">ส่วนตัว</p>
+              {/* Group: Personal */}
+              <p className="px-3 pt-2 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.personal')}</p>
               <button
                 onClick={() => setActiveTab('security')}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
@@ -1819,7 +1821,7 @@ export default function Settings() {
                 }`}
               >
                 <Shield className="w-4 h-4" />
-                <span className="text-sm font-medium">โปรไฟล์และความปลอดภัย</span>
+                <span className="text-sm font-medium">{t('settings.security')}</span>
               </button>
               <button
                 onClick={() => setActiveTab('notifications')}
@@ -1828,7 +1830,7 @@ export default function Settings() {
                 }`}
               >
                 <Bell className="w-4 h-4" />
-                <span className="text-sm font-medium">การแจ้งเตือน</span>
+                <span className="text-sm font-medium">{t('settings.notifications')}</span>
               </button>
               <button
                 onClick={() => setActiveTab('preferences')}
@@ -1837,11 +1839,11 @@ export default function Settings() {
                 }`}
               >
                 <Globe className="w-4 h-4" />
-                <span className="text-sm font-medium">การตั้งค่าทั่วไป</span>
+                <span className="text-sm font-medium">{t('settings.general')}</span>
               </button>
 
-              {/* Group: สัญญาและเอกสาร */}
-              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">สัญญา</p>
+              {/* Group: Contracts */}
+              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.contracts')}</p>
               <button
                 onClick={() => setActiveTab('templates')}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
@@ -1853,7 +1855,7 @@ export default function Settings() {
               </button>
 
               {/* Group: AI & Automation */}
-              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">AI & Automation</p>
+              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.ai_automation')}</p>
               <button
                 onClick={() => setActiveTab('ai')}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
@@ -2099,55 +2101,61 @@ export default function Settings() {
             {activeTab === 'preferences' && (
               <div className="space-y-6">
                 {/* Display & Theme */}
-                <div className="bg-white rounded-xl shadow-sm border p-6">
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-6">
                   <div className="flex items-center gap-3 mb-6">
                     <Globe className="w-6 h-6 text-blue-600" />
                     <div>
-                      <h2 className="text-lg font-semibold text-gray-900">การแสดงผล</h2>
-                      <p className="text-sm text-gray-500">ธีม ภาษา และความหนาแน่นของหน้าจอ</p>
+                      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('display.title')}</h2>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{t('display.subtitle')}</p>
                     </div>
                   </div>
 
                   <div className="space-y-6">
                     {/* Theme */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-3">ธีม</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('display.theme')}</label>
                       <div className="flex gap-3">
                         <button
                           onClick={() => setPreferences({ ...preferences, dark_mode: false })}
                           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border-2 transition ${
-                            !preferences.dark_mode ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                            !preferences.dark_mode 
+                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                              : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
                           }`}
                         >
                           <Sun className="w-5 h-5" />
-                          <span className="font-medium">สว่าง</span>
+                          <span className="font-medium">{t('display.theme.light')}</span>
                         </button>
                         <button
                           onClick={() => setPreferences({ ...preferences, dark_mode: true })}
                           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border-2 transition ${
-                            preferences.dark_mode ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                            preferences.dark_mode 
+                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                              : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
                           }`}
                         >
                           <Moon className="w-5 h-5" />
-                          <span className="font-medium">มืด</span>
+                          <span className="font-medium">{t('display.theme.dark')}</span>
                         </button>
                       </div>
                     </div>
 
                     {/* Display Density */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-3">ความหนาแน่นการแสดงผล</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('display.density')}</label>
                       <div className="flex gap-3">
                         {[
-                          { value: 'compact', label: 'กระทัดรัด', desc: 'ข้อมูลมากขึ้นในหน้าเดียว' },
-                          { value: 'normal', label: 'ปกติ', desc: 'ค่าเริ่มต้น' },
-                          { value: 'comfortable', label: 'โปร่ง', desc: 'อ่านง่ายขึ้น' }
+                          { value: 'compact', label: t('display.density.compact'), desc: t('display.density.compact_desc') },
+                          { value: 'normal', label: t('display.density.normal'), desc: t('display.density.normal_desc') },
+                          { value: 'comfortable', label: t('display.density.comfortable'), desc: t('display.density.comfortable_desc') }
                         ].map((d) => (
                           <button
                             key={d.value}
                             onClick={() => setPreferences({ ...preferences, display_density: d.value })}
                             className={`flex-1 px-3 py-2.5 rounded-lg border-2 text-center transition ${
-                              preferences.display_density === d.value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                              preferences.display_density === d.value 
+                                ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                                : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
                             }`}
                           >
                             <p className="font-medium text-sm">{d.label}</p>
@@ -2160,29 +2168,33 @@ export default function Settings() {
                     {/* Language */}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">ภาษาอินเตอร์เฟซ</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('display.language')}</label>
                         <select
-                          value={preferences.language}
-                          onChange={(e) => setPreferences({ ...preferences, language: e.target.value })}
-                          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          value={i18nLanguage}
+                          onChange={(e) => {
+                            const lang = e.target.value as 'th' | 'en'
+                            setI18nLanguage(lang)
+                            setPreferences({ ...preferences, language: lang })
+                          }}
+                          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                         >
-                          <option value="th">ไทย</option>
-                          <option value="en">English</option>
+                          <option value="th">{t('display.language.th')}</option>
+                          <option value="en">{t('display.language.en')}</option>
                         </select>
                       </div>
 
                       {/* Items Per Page */}
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">จำนวนรายการต่อหน้า</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('display.items_per_page')}</label>
                         <select
                           value={preferences.items_per_page}
                           onChange={(e) => setPreferences({ ...preferences, items_per_page: parseInt(e.target.value) })}
-                          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                         >
-                          <option value={10}>10 รายการ</option>
-                          <option value={20}>20 รายการ</option>
-                          <option value={50}>50 รายการ</option>
-                          <option value={100}>100 รายการ</option>
+                          <option value={10}>10</option>
+                          <option value={20}>20</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
                         </select>
                       </div>
                     </div>
@@ -2190,95 +2202,101 @@ export default function Settings() {
                 </div>
 
                 {/* Date & Region */}
-                <div className="bg-white rounded-xl shadow-sm border p-6">
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-6">
                   <div className="flex items-center gap-3 mb-6">
                     <Clock className="w-6 h-6 text-blue-600" />
                     <div>
-                      <h2 className="text-lg font-semibold text-gray-900">วันที่และภูมิภาค</h2>
-                      <p className="text-sm text-gray-500">รูปแบบวันที่ ระบบปฏิทิน และเขตเวลา</p>
+                      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('date.title')}</h2>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{t('date.subtitle')}</p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-6">
                     {/* Calendar System */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-3">ระบบปฏิทิน</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('date.calendar_system')}</label>
                       <div className="flex gap-3">
                         <button
                           onClick={() => setPreferences({ ...preferences, calendar_system: 'buddhist' })}
                           className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-center transition ${
-                            preferences.calendar_system === 'buddhist' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                            preferences.calendar_system === 'buddhist' 
+                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                              : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
                           }`}
                         >
-                          <p className="font-medium text-sm">พุทธศักราช</p>
-                          <p className="text-xs text-gray-400">พ.ศ. 2568</p>
+                          <p className="font-medium text-sm">{t('date.calendar.buddhist')}</p>
+                          <p className="text-xs text-gray-400">{t('date.calendar.buddhist_year')} 2568</p>
                         </button>
                         <button
                           onClick={() => setPreferences({ ...preferences, calendar_system: 'gregorian' })}
                           className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-center transition ${
-                            preferences.calendar_system === 'gregorian' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300'
+                            preferences.calendar_system === 'gregorian' 
+                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                              : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
                           }`}
                         >
-                          <p className="font-medium text-sm">คริสต์ศักราช</p>
-                          <p className="text-xs text-gray-400">ค.ศ. 2025</p>
+                          <p className="font-medium text-sm">{t('date.calendar.gregorian')}</p>
+                          <p className="text-xs text-gray-400">{t('date.calendar.gregorian_year')} 2025</p>
                         </button>
                       </div>
                     </div>
 
                     {/* Date Format */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">รูปแบบวันที่</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('date.date_format')}</label>
                       <select
                         value={preferences.date_format}
                         onChange={(e) => setPreferences({ ...preferences, date_format: e.target.value })}
-                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                       >
-                        <option value="dd/mm/yyyy">วว/ดด/ปปปป (26/02/2568)</option>
-                        <option value="dd-mm-yyyy">วว-ดด-ปปปป (26-02-2568)</option>
-                        <option value="yyyy-mm-dd">ปปปป-ดด-วว (2568-02-26)</option>
-                        <option value="dd mmmm yyyy">วว เดือน ปปปป (26 กุมภาพันธ์ 2568)</option>
-                        <option value="d mmmm yyyy">วว เดือน ปปปป (26 กุมภาพันธ์ 2568 พ.ศ.)</option>
+                        <option value="dd/mm/yyyy">dd/mm/yyyy (26/02/2025)</option>
+                        <option value="dd-mm-yyyy">dd-mm-yyyy (26-02-2025)</option>
+                        <option value="yyyy-mm-dd">yyyy-mm-dd (2025-02-26)</option>
+                        <option value="dd mmmm yyyy">dd mmmm yyyy (26 February 2025)</option>
+                        <option value="mmmm dd, yyyy">mmmm dd, yyyy (February 26, 2025)</option>
                       </select>
                     </div>
 
                     {/* Timezone (display only) */}
                     <div className="col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">เขตเวลา</label>
-                      <div className="flex items-center gap-3 px-4 py-2.5 border rounded-lg bg-gray-50">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('date.timezone')}</label>
+                      <div className="flex items-center gap-3 px-4 py-2.5 border rounded-lg bg-gray-50 dark:bg-gray-700 dark:border-gray-600">
                         <Globe className="w-4 h-4 text-gray-400 flex-shrink-0" />
                         <div>
-                          <span className="font-medium text-gray-700">Asia/Bangkok (UTC+7)</span>
-                          <span className="ml-2 text-sm text-gray-500">— เวลาประเทศไทยมาตรฐาน</span>
+                          <span className="font-medium text-gray-700 dark:text-gray-300">Asia/Bangkok (UTC+7)</span>
+                          <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">— {t('date.timezone_bangkok')}</span>
                         </div>
-                        <span className="ml-auto text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded">ค่าคงที่</span>
+                        <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 bg-gray-200 dark:bg-gray-600 px-2 py-0.5 rounded">{i18nLanguage === 'th' ? 'ค่าคงที่' : 'Fixed'}</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Navigation */}
-                <div className="bg-white rounded-xl shadow-sm border p-6">
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-6">
                   <div className="flex items-center gap-3 mb-6">
                     <SettingsIcon className="w-6 h-6 text-blue-600" />
                     <div>
-                      <h2 className="text-lg font-semibold text-gray-900">การนำทาง</h2>
-                      <p className="text-sm text-gray-500">หน้าแรกหลังเข้าสู่ระบบ</p>
+                      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('navigation.title')}</h2>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{t('navigation.subtitle')}</p>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">หน้าแรกหลังเข้าสู่ระบบ</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('navigation.default_page')}</label>
                     <div className="grid grid-cols-3 gap-3">
                       {[
-                        { value: 'dashboard', label: 'แดชบอร์ด', icon: Activity },
-                        { value: 'contracts', label: 'สัญญา', icon: FileText },
-                        { value: 'vendors', label: 'ผู้รับจ้าง', icon: Users }
+                        { value: 'dashboard', label: t('navigation.dashboard'), icon: Activity },
+                        { value: 'contracts', label: t('navigation.contracts'), icon: FileText },
+                        { value: 'vendors', label: t('navigation.vendors'), icon: Users }
                       ].map(({ value, label, icon: Icon }) => (
                         <button
                           key={value}
                           onClick={() => setPreferences({ ...preferences, default_page: value })}
                           className={`flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition ${
-                            preferences.default_page === value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                            preferences.default_page === value 
+                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                              : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 text-gray-600 dark:text-gray-300'
                           }`}
                         >
                           <Icon className="w-4 h-4" />
