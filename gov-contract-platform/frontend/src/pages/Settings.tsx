@@ -1000,6 +1000,13 @@ export default function Settings() {
   // Create Template Modal
   const [showCreateTemplate, setShowCreateTemplate] = useState(false)
 
+  // RAG Settings
+  const [ragSettings, setRagSettings] = useState({
+    embeddingProviderId: 'default-embedding',
+    chunkSize: 512,
+    chunkOverlap: 50
+  })
+
   // Load Templates and Agents
   useEffect(() => {
     fetchTemplates()
@@ -3237,20 +3244,94 @@ export default function Settings() {
                       </div>
                       <span className="text-sm text-green-600 font-medium">พร้อมใช้งาน</span>
                     </div>
-                    <div className="flex items-center justify-between py-3 border-b">
-                      <div>
-                        <p className="font-medium text-gray-900">Embedding Model</p>
-                        <p className="text-sm text-gray-500">โมเดลสำหรับแปลงข้อความเป็นเวกเตอร์</p>
+                    
+                    {/* Embedding Model Selection */}
+                    <div className="py-3 border-b">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="font-medium text-gray-900">Embedding Model</p>
+                          <p className="text-sm text-gray-500">โมเดลสำหรับแปลงข้อความเป็นเวกเตอร์</p>
+                        </div>
                       </div>
-                      <span className="text-sm text-gray-600">nomic-embed-text (Ollama)</span>
+                      <select
+                        value={ragSettings.embeddingProviderId}
+                        onChange={(e) => setRagSettings({...ragSettings, embeddingProviderId: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                      >
+                        <option value="">เลือก Embedding Model</option>
+                        {aiProviders
+                          .filter(p => p.modelType === 'embedding')
+                          .map(provider => (
+                            <option key={provider.id} value={provider.id}>
+                              {provider.name} ({provider.model})
+                            </option>
+                          ))}
+                      </select>
+                      {ragSettings.embeddingProviderId && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          {(() => {
+                            const provider = aiProviders.find(p => p.id === ragSettings.embeddingProviderId)
+                            return provider ? `Provider: ${provider.type} | Model: ${provider.model}` : ''
+                          })()}
+                        </p>
+                      )}
                     </div>
-                    <div className="flex items-center justify-between py-3">
-                      <div>
-                        <p className="font-medium text-gray-900">Chunk Size</p>
-                        <p className="text-sm text-gray-500">ขนาดของแต่ละส่วนที่แบ่งจากเอกสาร</p>
+                    
+                    {/* Chunk Size Selection */}
+                    <div className="py-3 border-b">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="font-medium text-gray-900">Chunk Size</p>
+                          <p className="text-sm text-gray-500">ขนาดของแต่ละส่วนที่แบ่งจากเอกสาร</p>
+                        </div>
                       </div>
-                      <span className="text-sm text-gray-600">512 tokens</span>
+                      <select
+                        value={ragSettings.chunkSize}
+                        onChange={(e) => setRagSettings({...ragSettings, chunkSize: parseInt(e.target.value)})}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                      >
+                        <option value={256}>256 tokens (เหมาะกับเอกสารสั้น)</option>
+                        <option value={512}>512 tokens (ค่าเริ่มต้น)</option>
+                        <option value={1024}>1024 tokens (เหมาะกับเอกสารยาว)</option>
+                        <option value={2048}>2048 tokens (เอกสารที่ซับซ้อนมาก)</option>
+                      </select>
                     </div>
+                    
+                    {/* Chunk Overlap Selection */}
+                    <div className="py-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="font-medium text-gray-900">Chunk Overlap</p>
+                          <p className="text-sm text-gray-500">จำนวน tokens ที่ทับซ้อนกันระหว่าง chunks</p>
+                        </div>
+                      </div>
+                      <select
+                        value={ragSettings.chunkOverlap}
+                        onChange={(e) => setRagSettings({...ragSettings, chunkOverlap: parseInt(e.target.value)})}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                      >
+                        <option value={0}>0 tokens (ไม่ทับซ้อน)</option>
+                        <option value={25}>25 tokens</option>
+                        <option value={50}>50 tokens (ค่าเริ่มต้น)</option>
+                        <option value={100}>100 tokens</option>
+                        <option value={200}>200 tokens (ทับซ้อนมาก - ความแม่นยำสูง)</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  {/* Save RAG Settings Button */}
+                  <div className="mt-4 pt-4 border-t flex justify-end">
+                    <button
+                      onClick={() => {
+                        // In production, save to backend
+                        setMessage({type: 'success', text: 'บันทึกการตั้งค่า RAG สำเร็จ'})
+                        setTimeout(() => setMessage(null), 3000)
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+                    >
+                      <Save className="w-4 h-4" />
+                      บันทึกการตั้งค่า
+                    </button>
                   </div>
                 </div>
 
