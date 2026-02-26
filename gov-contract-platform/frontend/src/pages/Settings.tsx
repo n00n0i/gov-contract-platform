@@ -2101,12 +2101,12 @@ export default function Settings() {
             {activeTab === 'preferences' && (
               <div className="space-y-6">
                 {/* Display & Theme */}
-                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-6">
+                <div className="p-6">
                   <div className="flex items-center gap-3 mb-6">
                     <Globe className="w-6 h-6 text-blue-600" />
                     <div>
-                      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('display.title')}</h2>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">{t('display.subtitle')}</p>
+                      <h2 className="text-lg font-semibold text-gray-900">{t('display.title')}</h2>
+                      <p className="text-sm text-gray-500">{t('display.subtitle')}</p>
                     </div>
                   </div>
 
