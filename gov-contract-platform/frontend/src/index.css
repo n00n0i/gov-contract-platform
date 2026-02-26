@@ -12,6 +12,7 @@
 /* Base styles */
 html {
   transition: background-color 0.3s ease, color 0.3s ease;
+  background-color: #f1f5f9;
 }
 
 body {
@@ -22,10 +23,24 @@ body {
   min-height: 100vh;
 }
 
-/* Dark mode - Force with !important to override Tailwind */
-html.dark,
-html.dark body,
+/* Dark mode - Tailwind v4 strategy */
+.dark {
+  color-scheme: dark;
+}
+
+.dark html,
 .dark body {
+  background-color: #111827 !important;
+  color: #f9fafb !important;
+}
+
+/* Alternative: using class on html element */
+html[class~="dark"] {
+  background-color: #111827 !important;
+  color: #f9fafb !important;
+}
+
+html[class~="dark"] body {
   background-color: #111827 !important;
   color: #f9fafb !important;
 }
@@ -33,8 +48,5 @@ html.dark body,
 /* Ensure the root element also has dark background */
 #root {
   min-height: 100vh;
-}
-
-html.dark #root {
-  background-color: #111827;
+  background-color: inherit;
 }

@@ -1851,7 +1851,7 @@ export default function Settings() {
                 }`}
               >
                 <FileStack className="w-4 h-4" />
-                <span className="text-sm font-medium">แม่แบบสัญญา</span>
+                <span className="text-sm font-medium">{t('settings.templates')}</span>
               </button>
 
               {/* Group: AI & Automation */}
@@ -1902,8 +1902,8 @@ export default function Settings() {
                 <span className="text-sm font-medium">GraphRAG</span>
               </button>
 
-              {/* Group: ระบบ */}
-              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">ระบบ</p>
+              {/* Group: System */}
+              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.system')}</p>
               <button
                 onClick={() => setActiveTab('ocr')}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
@@ -1920,11 +1920,11 @@ export default function Settings() {
                 }`}
               >
                 <Server className="w-4 h-4" />
-                <span className="text-sm font-medium">เซิร์ฟเวอร์และ API</span>
+                <span className="text-sm font-medium">{t('settings.server_api')}</span>
               </button>
 
-              {/* Group: การจัดการ */}
-              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">การจัดการ</p>
+              {/* Group: Management */}
+              <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.management')}</p>
               <button
                 onClick={() => setActiveTab('org-structure')}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
@@ -1932,7 +1932,7 @@ export default function Settings() {
                 }`}
               >
                 <Building2 className="w-4 h-4" />
-                <span className="text-sm font-medium">โครงสร้างองค์กร</span>
+                <span className="text-sm font-medium">{t('settings.org_structure')}</span>
               </button>
               <button
                 onClick={() => setActiveTab('users')}
@@ -1941,7 +1941,7 @@ export default function Settings() {
                 }`}
               >
                 <Users className="w-4 h-4" />
-                <span className="text-sm font-medium">จัดการผู้ใช้</span>
+                <span className="text-sm font-medium">{t('settings.user_management')}</span>
               </button>
             </nav>
           </div>
