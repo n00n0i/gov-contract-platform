@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { useEffect } from 'react'
 import axios from 'axios'
 import DocumentUpload from './pages/DocumentUpload'
 import Contracts from './pages/Contracts'
@@ -29,6 +30,19 @@ api.interceptors.request.use((config) => {
 })
 
 function App() {
+  useEffect(() => {
+    const theme = localStorage.getItem('theme')
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+    const density = localStorage.getItem('display_density')
+    if (density) {
+      document.documentElement.setAttribute('data-density', density)
+    }
+  }, [])
+
   return (
     <BrowserRouter>
       <Routes>

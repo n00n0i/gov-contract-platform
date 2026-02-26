@@ -9,14 +9,9 @@
   --danger: #ef4444;
 }
 
-/* Dark mode - ใช้ Tailwind dark: classes */
-html.dark {
-  color-scheme: dark;
-}
-
-html.dark body {
-  background-color: #111827;
-  color: #f9fafb;
+/* Base styles */
+html {
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 body {
@@ -24,10 +19,22 @@ body {
   background-color: #f1f5f9;
   color: #1f2937;
   transition: background-color 0.3s ease, color 0.3s ease;
+  min-height: 100vh;
 }
 
-/* Override for Tailwind v4 dark mode */
+/* Dark mode - Force with !important to override Tailwind */
+html.dark,
+html.dark body,
 .dark body {
+  background-color: #111827 !important;
+  color: #f9fafb !important;
+}
+
+/* Ensure the root element also has dark background */
+#root {
+  min-height: 100vh;
+}
+
+html.dark #root {
   background-color: #111827;
-  color: #f9fafb;
 }

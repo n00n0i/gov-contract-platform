@@ -1790,7 +1790,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
       <NavigationHeader
         title="ตั้งค่า"
         subtitle="Settings"

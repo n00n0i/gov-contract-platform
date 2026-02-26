@@ -194,18 +194,8 @@ export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [])
 
   const t = (key: string): string => {
-    const keys = key.split('.')
-    let value: any = translations[language]
-    
-    for (const k of keys) {
-      if (value && typeof value === 'object') {
-        value = value[k]
-      } else {
-        return key // Return key if translation not found
-      }
-    }
-    
-    return value || key
+    const dict = translations[language] as Record<string, string>
+    return dict[key] || key
   }
 
   return (
