@@ -9,7 +9,7 @@ import {
   Bot, FileStack, Copy, Plus, Trash2, Edit3, Play, Pause,
   Settings2, Workflow, Cpu, MessagesSquare, Key, Settings as SettingsIcon, Clock,
   BookOpen, X, Users, UserPlus, UserCog, Building2, ChevronRight, ChevronDown, FolderTree, Zap,
-  HardDrive
+  HardDrive, FileArchive, BrainCircuit, DatabaseBackup, Layers
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
@@ -4745,77 +4745,175 @@ export default function Settings() {
   )
 }
 
-// Storage Settings Component
+// Storage Settings Component - 2 Sections: MinIO (Files) & RAG (Content)
 function StorageSettings() {
-  const [storageStats, setStorageStats] = useState({
+  const [activeStorageTab, setActiveStorageTab] = useState<'minio' | 'rag'>('minio')
+  const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
+  
+  // MinIO State - เก็บไฟล์ตัวจริง
+  const [minioStats, setMinioStats] = useState({
     totalSize: 0,
     documentCount: 0,
     bucketName: 'govplatform',
     endpoint: 'minio:9000'
   })
-  const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
-  const [storageConfig, setStorageConfig] = useState({
+  const [minioConfig, setMinioConfig] = useState({
     type: 'minio',
     bucket: 'govplatform',
     endpoint: 'minio:9000',
     accessKey: '',
-    secretKey: ''
+    secretKey: '',
+    secure: false
   })
-  const [showKeys, setShowKeys] = useState(false)
+  const [showMinioKeys, setShowMinioKeys] = useState(false)
+  const [minioLoading, setMinioLoading] = useState(true)
+  
+  // RAG State - เก็บ content ที่ได้จากการประมวลผล
+  const [ragStats, setRagStats] = useState({
+    totalChunks: 0,
+    totalEmbeddings: 0,
+    vectorSize: 0,
+    lastSync: null as string | null
+  })
+  const [ragConfig, setRagConfig] = useState({
+    enabled: true,
+    provider: 'pgvector', // pgvector, elasticsearch, pinecone, chroma
+    indexName: 'contract_embeddings',
+    chunkSize: 512,
+    chunkOverlap: 50,
+    embeddingModel: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+    dimension: 384,
+    // For external vector DBs
+    apiKey: '',
+    endpoint: '',
+    environment: ''
+  })
+  const [showRagKey, setShowRagKey] = useState(false)
+  const [ragLoading, setRagLoading] = useState(true)
+  
+  // Common Retention Settings
   const [retentionDays, setRetentionDays] = useState(2555) // 7 years default
   const [autoCleanup, setAutoCleanup] = useState(false)
 
   useEffect(() => {
-    fetchStorageStats()
+    fetchMinioStats()
+    fetchRagStats()
   }, [])
 
-  const fetchStorageStats = async () => {
-    setLoading(true)
+  const fetchMinioStats = async () => {
+    setMinioLoading(true)
     try {
-      const response = await fetch('/api/v1/admin/storage/stats')
+      const response = await fetch('/api/v1/admin/storage/minio/stats')
       if (response.ok) {
         const data = await response.json()
-        setStorageStats(data)
+        setMinioStats(data)
       }
     } catch (err) {
-      console.error('Failed to fetch storage stats:', err)
+      console.error('Failed to fetch MinIO stats:', err)
     } finally {
-      setLoading(false)
+      setMinioLoading(false)
     }
   }
 
-  const handleSaveConfig = async () => {
+  const fetchRagStats = async () => {
+    setRagLoading(true)
     try {
-      const response = await fetch('/api/v1/admin/storage/config', {
+      const response = await fetch('/api/v1/admin/storage/rag/stats')
+      if (response.ok) {
+        const data = await response.json()
+        setRagStats(data)
+      }
+    } catch (err) {
+      console.error('Failed to fetch RAG stats:', err)
+    } finally {
+      setRagLoading(false)
+    }
+  }
+
+  const handleSaveMinioConfig = async () => {
+    try {
+      const response = await fetch('/api/v1/admin/storage/minio/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(storageConfig)
+        body: JSON.stringify(minioConfig)
       })
       if (response.ok) {
-        setMessage({ type: 'success', text: 'บันทึกการตั้งค่าพื้นที่จัดเก็บสำเร็จ' })
+        setMessage({ type: 'success', text: 'บันทึกการตั้งค่า MinIO สำเร็จ' })
+        setTimeout(() => setMessage(null), 3000)
       } else {
-        setMessage({ type: 'error', text: 'ไม่สามารถบันทึกการตั้งค่าได้' })
+        setMessage({ type: 'error', text: 'ไม่สามารถบันทึกการตั้งค่า MinIO ได้' })
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' })
     }
   }
 
-  const handleTestConnection = async () => {
+  const handleSaveRagConfig = async () => {
     try {
-      const response = await fetch('/api/v1/admin/storage/test', {
+      const response = await fetch('/api/v1/admin/storage/rag/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(storageConfig)
+        body: JSON.stringify(ragConfig)
       })
       if (response.ok) {
-        setMessage({ type: 'success', text: 'ทดสอบการเชื่อมต่อสำเร็จ' })
+        setMessage({ type: 'success', text: 'บันทึกการตั้งค่า RAG Storage สำเร็จ' })
+        setTimeout(() => setMessage(null), 3000)
       } else {
-        setMessage({ type: 'error', text: 'ไม่สามารถเชื่อมต่อได้' })
+        setMessage({ type: 'error', text: 'ไม่สามารถบันทึกการตั้งค่า RAG ได้' })
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' })
+    }
+  }
+
+  const handleTestMinioConnection = async () => {
+    try {
+      const response = await fetch('/api/v1/admin/storage/minio/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(minioConfig)
+      })
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'ทดสอบการเชื่อมต่อ MinIO สำเร็จ' })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ type: 'error', text: 'ไม่สามารถเชื่อมต่อ MinIO ได้' })
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ MinIO' })
+    }
+  }
+
+  const handleTestRagConnection = async () => {
+    try {
+      const response = await fetch('/api/v1/admin/storage/rag/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ragConfig)
+      })
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'ทดสอบการเชื่อมต่อ RAG Storage สำเร็จ' })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ type: 'error', text: 'ไม่สามารถเชื่อมต่อ RAG Storage ได้' })
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ RAG' })
+    }
+  }
+
+  const handleSyncRag = async () => {
+    try {
+      const response = await fetch('/api/v1/admin/storage/rag/sync', { method: 'POST' })
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'เริ่มการซิงค์ข้อมูล RAG แล้ว' })
+        setTimeout(() => setMessage(null), 3000)
+        fetchRagStats()
+      } else {
+        setMessage({ type: 'error', text: 'ไม่สามารถซิงค์ข้อมูลได้' })
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการซิงค์' })
     }
   }
 
@@ -4829,153 +4927,408 @@ function StorageSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Storage Overview */}
+      {/* Header */}
       <div className="bg-white rounded-xl shadow-sm border p-6">
-        <div className="flex items-center gap-3 mb-6">
+        <div className="flex items-center gap-3 mb-4">
           <HardDrive className="w-6 h-6 text-blue-600" />
           <div>
             <h2 className="text-lg font-semibold text-gray-900">พื้นที่จัดเก็บสัญญา</h2>
-            <p className="text-sm text-gray-500">จัดการการตั้งค่าและดูสถิติการใช้งานพื้นที่จัดเก็บ</p>
+            <p className="text-sm text-gray-500">จัดการการตั้งค่าการจัดเก็บไฟล์และเนื้อหา (แยกจาก Knowledge Base)</p>
           </div>
         </div>
 
         {message && (
-          <div className={`mb-4 p-3 rounded-lg flex items-center gap-2 ${
+          <div className={`p-3 rounded-lg flex items-center gap-2 ${
             message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
           }`}>
             {message.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
             {message.text}
           </div>
         )}
+      </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
-            <p className="text-sm text-gray-600 mb-1">พื้นที่ใช้งานทั้งหมด</p>
-            <p className="text-2xl font-bold text-blue-700">{loading ? '...' : formatSize(storageStats.totalSize)}</p>
-          </div>
-          <div className="bg-green-50 rounded-lg p-4 border border-green-100">
-            <p className="text-sm text-gray-600 mb-1">จำนวนเอกสาร</p>
-            <p className="text-2xl font-bold text-green-700">{loading ? '...' : storageStats.documentCount.toLocaleString()}</p>
-          </div>
-          <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
-            <p className="text-sm text-gray-600 mb-1">Bucket</p>
-            <p className="text-lg font-bold text-purple-700">{storageStats.bucketName}</p>
-          </div>
+      {/* Tab Navigation */}
+      <div className="bg-white rounded-xl shadow-sm border p-2">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setActiveStorageTab('minio')}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition ${
+              activeStorageTab === 'minio'
+                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                : 'hover:bg-gray-50 text-gray-600'
+            }`}
+          >
+            <FileArchive className="w-5 h-5" />
+            <div className="text-left">
+              <p className="font-medium">MinIO Storage</p>
+              <p className="text-xs opacity-75">เก็บไฟล์ตัวจริง (PDF, รูปภาพ)</p>
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveStorageTab('rag')}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition ${
+              activeStorageTab === 'rag'
+                ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                : 'hover:bg-gray-50 text-gray-600'
+            }`}
+          >
+            <BrainCircuit className="w-5 h-5" />
+            <div className="text-left">
+              <p className="font-medium">RAG Storage</p>
+              <p className="text-xs opacity-75">เก็บเนื้อหาและ Embeddings</p>
+            </div>
+          </button>
         </div>
       </div>
 
-      {/* Storage Configuration */}
-      <div className="bg-white rounded-xl shadow-sm border p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <Server className="w-5 h-5 text-gray-600" />
-          ตั้งค่าการเชื่อมต่อ
-        </h3>
-
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">ประเภท Storage</label>
-              <select
-                value={storageConfig.type}
-                onChange={(e) => setStorageConfig({...storageConfig, type: e.target.value})}
-                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="minio">MinIO (Local)</option>
-                <option value="s3">Amazon S3</option>
-                <option value="gcs">Google Cloud Storage</option>
-                <option value="azure">Azure Blob Storage</option>
-              </select>
+      {/* MinIO Section - เก็บไฟล์ตัวจริง */}
+      {activeStorageTab === 'minio' && (
+        <div className="space-y-6">
+          {/* MinIO Stats */}
+          <div className="bg-white rounded-xl shadow-sm border p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <DatabaseBackup className="w-5 h-5 text-blue-600" />
+              <h3 className="text-lg font-semibold text-gray-900">สถิติการใช้งาน (Object Storage)</h3>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Bucket Name</label>
-              <input
-                type="text"
-                value={storageConfig.bucket}
-                onChange={(e) => setStorageConfig({...storageConfig, bucket: e.target.value})}
-                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Endpoint URL</label>
-            <input
-              type="text"
-              value={storageConfig.endpoint}
-              onChange={(e) => setStorageConfig({...storageConfig, endpoint: e.target.value})}
-              placeholder="minio:9000 หรือ s3.amazonaws.com"
-              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Access Key</label>
-              <div className="relative">
-                <input
-                  type={showKeys ? 'text' : 'password'}
-                  value={storageConfig.accessKey}
-                  onChange={(e) => setStorageConfig({...storageConfig, accessKey: e.target.value})}
-                  className="w-full px-4 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+                <p className="text-sm text-gray-600 mb-1">พื้นที่ใช้งานทั้งหมด</p>
+                <p className="text-2xl font-bold text-blue-700">{minioLoading ? '...' : formatSize(minioStats.totalSize)}</p>
               </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Secret Key</label>
-              <div className="relative">
-                <input
-                  type={showKeys ? 'text' : 'password'}
-                  value={storageConfig.secretKey}
-                  onChange={(e) => setStorageConfig({...storageConfig, secretKey: e.target.value})}
-                  className="w-full px-4 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+              <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+                <p className="text-sm text-gray-600 mb-1">จำนวนไฟล์</p>
+                <p className="text-2xl font-bold text-green-700">{minioLoading ? '...' : minioStats.documentCount.toLocaleString()}</p>
+              </div>
+              <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+                <p className="text-sm text-gray-600 mb-1">Bucket</p>
+                <p className="text-lg font-bold text-purple-700">{minioStats.bucketName}</p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="showKeys"
-              checked={showKeys}
-              onChange={(e) => setShowKeys(e.target.checked)}
-              className="w-4 h-4 text-blue-600 rounded"
-            />
-            <label htmlFor="showKeys" className="text-sm text-gray-700">แสดง API Keys</label>
-          </div>
+          {/* MinIO Configuration */}
+          <div className="bg-white rounded-xl shadow-sm border p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <Server className="w-5 h-5 text-gray-600" />
+              ตั้งค่า MinIO (Object Storage)
+            </h3>
 
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={handleTestConnection}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
-            >
-              <Activity className="w-4 h-4" />
-              ทดสอบการเชื่อมต่อ
-            </button>
-            <button
-              onClick={handleSaveConfig}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              <Save className="w-4 h-4" />
-              บันทึกการตั้งค่า
-            </button>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">ประเภท Storage</label>
+                  <select
+                    value={minioConfig.type}
+                    onChange={(e) => setMinioConfig({...minioConfig, type: e.target.value})}
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="minio">MinIO (Local)</option>
+                    <option value="s3">Amazon S3</option>
+                    <option value="gcs">Google Cloud Storage</option>
+                    <option value="azure">Azure Blob Storage</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Bucket Name</label>
+                  <input
+                    type="text"
+                    value={minioConfig.bucket}
+                    onChange={(e) => setMinioConfig({...minioConfig, bucket: e.target.value})}
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Endpoint URL</label>
+                <input
+                  type="text"
+                  value={minioConfig.endpoint}
+                  onChange={(e) => setMinioConfig({...minioConfig, endpoint: e.target.value})}
+                  placeholder="minio:9000 หรือ s3.amazonaws.com"
+                  className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Access Key</label>
+                  <input
+                    type={showMinioKeys ? 'text' : 'password'}
+                    value={minioConfig.accessKey}
+                    onChange={(e) => setMinioConfig({...minioConfig, accessKey: e.target.value})}
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Secret Key</label>
+                  <input
+                    type={showMinioKeys ? 'text' : 'password'}
+                    value={minioConfig.secretKey}
+                    onChange={(e) => setMinioConfig({...minioConfig, secretKey: e.target.value})}
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="showMinioKeys"
+                  checked={showMinioKeys}
+                  onChange={(e) => setShowMinioKeys(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded"
+                />
+                <label htmlFor="showMinioKeys" className="text-sm text-gray-700">แสดง API Keys</label>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleTestMinioConnection}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
+                >
+                  <Activity className="w-4 h-4" />
+                  ทดสอบการเชื่อมต่อ
+                </button>
+                <button
+                  onClick={handleSaveMinioConfig}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                >
+                  <Save className="w-4 h-4" />
+                  บันทึกการตั้งค่า
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Retention Policy */}
+      {/* RAG Section - เก็บ content ที่ได้จากการประมวลผล */}
+      {activeStorageTab === 'rag' && (
+        <div className="space-y-6">
+          {/* RAG Stats */}
+          <div className="bg-white rounded-xl shadow-sm border p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Layers className="w-5 h-5 text-purple-600" />
+              <h3 className="text-lg font-semibold text-gray-900">สถิติการใช้งาน (Vector Storage)</h3>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+                <p className="text-sm text-gray-600 mb-1">จำนวน Chunks</p>
+                <p className="text-2xl font-bold text-purple-700">{ragLoading ? '...' : ragStats.totalChunks.toLocaleString()}</p>
+              </div>
+              <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-100">
+                <p className="text-sm text-gray-600 mb-1">จำนวน Embeddings</p>
+                <p className="text-2xl font-bold text-indigo-700">{ragLoading ? '...' : ragStats.totalEmbeddings.toLocaleString()}</p>
+              </div>
+              <div className="bg-pink-50 rounded-lg p-4 border border-pink-100">
+                <p className="text-sm text-gray-600 mb-1">Vector Size</p>
+                <p className="text-2xl font-bold text-pink-700">{ragLoading ? '...' : formatSize(ragStats.vectorSize)}</p>
+              </div>
+              <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
+                <p className="text-sm text-gray-600 mb-1">ซิงค์ล่าสุด</p>
+                <p className="text-lg font-bold text-orange-700">{ragStats.lastSync || 'ยังไม่มี'}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* RAG Configuration */}
+          <div className="bg-white rounded-xl shadow-sm border p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <BrainCircuit className="w-5 h-5 text-gray-600" />
+              ตั้งค่า RAG Storage (Vector Database)
+            </h3>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-900">เปิดใช้งาน RAG Storage</p>
+                  <p className="text-sm text-gray-500">เก็บเนื้อหาและ embeddings สำหรับการค้นหา</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ragConfig.enabled}
+                    onChange={(e) => setRagConfig({...ragConfig, enabled: e.target.checked})}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Vector Database Provider</label>
+                  <select
+                    value={ragConfig.provider}
+                    onChange={(e) => setRagConfig({...ragConfig, provider: e.target.value})}
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  >
+                    <option value="pgvector">PostgreSQL pgvector (Local)</option>
+                    <option value="elasticsearch">Elasticsearch</option>
+                    <option value="pinecone">Pinecone</option>
+                    <option value="chroma">ChromaDB</option>
+                    <option value="weaviate">Weaviate</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Index Name</label>
+                  <input
+                    type="text"
+                    value={ragConfig.indexName}
+                    onChange={(e) => setRagConfig({...ragConfig, indexName: e.target.value})}
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Chunk Size</label>
+                  <input
+                    type="number"
+                    value={ragConfig.chunkSize}
+                    onChange={(e) => setRagConfig({...ragConfig, chunkSize: parseInt(e.target.value)})}
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">จำนวนตัวอักษรต่อ chunk</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Chunk Overlap</label>
+                  <input
+                    type="number"
+                    value={ragConfig.chunkOverlap}
+                    onChange={(e) => setRagConfig({...ragConfig, chunkOverlap: parseInt(e.target.value)})}
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">จำนวนตัวอักษรทับซ้อนกัน</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Embedding Model</label>
+                <select
+                  value={ragConfig.embeddingModel}
+                  onChange={(e) => setRagConfig({...ragConfig, embeddingModel: e.target.value})}
+                  className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                >
+                  <option value="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2">MiniLM-L12 (384 dim) - แนะนำ</option>
+                  <option value="sentence-transformers/all-MiniLM-L6-v2">All-MiniLM-L6 (384 dim)</option>
+                  <option value="sentence-transformers/paraphrase-multilingual-MiniLM-L6-v2">MiniLM-L6 (384 dim)</option>
+                  <option value="BAAI/bge-m3">BGE-M3 (1024 dim) - รองรับภาษาไทยดี</option>
+                  <option value="intfloat/multilingual-e5-large">E5-Large (1024 dim)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">โมเดลสำหรับแปลงข้อความเป็นเวกเตอร์</p>
+              </div>
+
+              {/* External Provider Settings (show only for external providers) */}
+              {ragConfig.provider !== 'pgvector' && ragConfig.provider !== 'chroma' && (
+                <div className="space-y-4 p-4 bg-gray-50 rounded-lg">
+                  <h4 className="font-medium text-gray-900">ตั้งค่า External Provider</h4>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">API Key</label>
+                    <input
+                      type={showRagKey ? 'text' : 'password'}
+                      value={ragConfig.apiKey}
+                      onChange={(e) => setRagConfig({...ragConfig, apiKey: e.target.value})}
+                      className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    />
+                  </div>
+
+                  {ragConfig.provider === 'pinecone' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Environment</label>
+                      <input
+                        type="text"
+                        value={ragConfig.environment}
+                        onChange={(e) => setRagConfig({...ragConfig, environment: e.target.value})}
+                        placeholder="us-west1-gcp"
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Endpoint URL (Optional)</label>
+                    <input
+                      type="text"
+                      value={ragConfig.endpoint}
+                      onChange={(e) => setRagConfig({...ragConfig, endpoint: e.target.value})}
+                      placeholder="https://api.example.com"
+                      className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="showRagKey"
+                      checked={showRagKey}
+                      onChange={(e) => setShowRagKey(e.target.checked)}
+                      className="w-4 h-4 text-purple-600 rounded"
+                    />
+                    <label htmlFor="showRagKey" className="text-sm text-gray-700">แสดง API Key</label>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleTestRagConnection}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
+                >
+                  <Activity className="w-4 h-4" />
+                  ทดสอบการเชื่อมต่อ
+                </button>
+                <button
+                  onClick={handleSyncRag}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition"
+                >
+                  <Zap className="w-4 h-4" />
+                  ซิงค์ข้อมูล
+                </button>
+                <button
+                  onClick={handleSaveRagConfig}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
+                >
+                  <Save className="w-4 h-4" />
+                  บันทึกการตั้งค่า
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* RAG Tips */}
+          <div className="bg-purple-50 rounded-xl border border-purple-200 p-6">
+            <h3 className="text-sm font-semibold text-purple-800 mb-2 flex items-center gap-2">
+              <Info className="w-4 h-4" />
+              ข้อมูลเพิ่มเติม
+            </h3>
+            <ul className="text-sm text-purple-700 space-y-1 list-disc list-inside">
+              <li>RAG Storage ใช้เก็บเนื้อหาที่แยกจากไฟล์ (extracted text) และ embeddings</li>
+              <li>แยกจาก Knowledge Base ที่ใช้เก็บเอกสารอ้างอิงสำหรับ AI</li>
+              <li>การซิงค์จะประมวลผลเอกสารทั้งหมดใน MinIO ใหม่อีกครั้ง</li>
+              <li>การเปลี่ยน Embedding Model ต้องซิงค์ข้อมูลใหม่ทั้งหมด</li>
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* Common Retention Policy */}
       <div className="bg-white rounded-xl shadow-sm border p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
           <Clock className="w-5 h-5 text-gray-600" />
-          นโยบายการเก็บรักษาเอกสาร
+          นโยบายการเก็บรักษาเอกสาร (ทั้ง MinIO และ RAG)
         </h3>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
             <div>
-              <p className="font-medium text-gray-900">เก็บเอกสารตามกำหนดเวลา</p>
-              <p className="text-sm text-gray-500">ลบเอกสารที่เกินระยะเวลาที่กำหนดโดยอัตโนมัติ</p>
+              <p className="font-medium text-gray-900">ลบเอกสารอัตโนมัติ</p>
+              <p className="text-sm text-gray-500">ลบไฟล์และข้อมูล RAG ที่เกินระยะเวลาที่กำหนด</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -4990,7 +5343,7 @@ function StorageSettings() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              ระยะเวลาเก็บรักษา (วัน): <span className="text-blue-600 font-bold">{retentionDays} วัน</span>
+              ระยะเวลาเก็บรักษา: <span className="text-blue-600 font-bold">{retentionDays} วัน</span>
               <span className="text-gray-500 ml-2">({Math.floor(retentionDays / 365)} ปี)</span>
             </label>
             <input
@@ -5009,20 +5362,6 @@ function StorageSettings() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Storage Tips */}
-      <div className="bg-amber-50 rounded-xl border border-amber-200 p-6">
-        <h3 className="text-sm font-semibold text-amber-800 mb-2 flex items-center gap-2">
-          <Info className="w-4 h-4" />
-          คำแนะนำ
-        </h3>
-        <ul className="text-sm text-amber-700 space-y-1 list-disc list-inside">
-          <li>เอกสารสัญญาทั้งหมดจะถูกเข้ารหัส (encrypted) ก่อนจัดเก็บ</li>
-          <li>ควรสำรองข้อมูล (backup) เป็นประจำทุกวัน</li>
-          <li>ตรวจสอบพื้นที่ใช้งานอย่างสม่ำเสมอเพื่อป้องกันพื้นที่เต็ม</li>
-          <li>หากเปลี่ยนการตั้งค่า Storage ต้อง restart ระบบเพื่อให้มีผล</li>
-        </ul>
       </div>
     </div>
   )
