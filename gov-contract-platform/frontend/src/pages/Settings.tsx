@@ -878,16 +878,22 @@ export default function Settings() {
     system_updates: true
   })
 
-  // Preferences
-  const [preferences, setPreferences] = useState({
-    dark_mode: false,
-    language: 'th',
-    items_per_page: 20,
-    date_format: 'dd/mm/yyyy',
-    calendar_system: 'buddhist',
-    default_page: 'dashboard',
-    display_density: 'normal'
-  })
+  // Preferences - initialize from localStorage first
+  const getInitialPreferences = () => {
+    const savedTheme = localStorage.getItem('theme')
+    const savedDensity = localStorage.getItem('display_density')
+    return {
+      dark_mode: savedTheme === 'dark',
+      language: 'th',
+      items_per_page: 20,
+      date_format: 'dd/mm/yyyy',
+      calendar_system: 'buddhist',
+      default_page: 'dashboard',
+      display_density: savedDensity || 'normal'
+    }
+  }
+  
+  const [preferences, setPreferences] = useState(getInitialPreferences())
 
   // OCR Settings
   const [ocrSettings, setOcrSettings] = useState({
@@ -1077,7 +1083,22 @@ export default function Settings() {
     if (activeTab === 'users') fetchUsers()
   }, [activeTab])
 
-  // Apply dark mode to document
+  // Initialize dark mode on mount (runs once)
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme')
+    if (savedTheme === 'dark') {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+    
+    const savedDensity = localStorage.getItem('display_density')
+    if (savedDensity) {
+      document.documentElement.setAttribute('data-density', savedDensity)
+    }
+  }, [])
+
+  // Apply dark mode to document when preferences change
   useEffect(() => {
     if (preferences.dark_mode) {
       document.documentElement.classList.add('dark')
@@ -1091,6 +1112,7 @@ export default function Settings() {
   // Apply display density
   useEffect(() => {
     document.documentElement.setAttribute('data-density', preferences.display_density)
+    localStorage.setItem('display_density', preferences.display_density)
   }, [preferences.display_density])
 
   const fetchTemplates = async () => {
