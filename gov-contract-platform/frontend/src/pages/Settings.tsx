@@ -5695,7 +5695,7 @@ function StorageSettings() {
             </div>
           </div>
 
-          {/* RAG Tips -->
+          {/* RAG Tips */}
           <div className="bg-purple-50 rounded-xl border border-purple-200 p-6">
             <h3 className="text-sm font-semibold text-purple-800 mb-2 flex items-center gap-2">
               <Info className="w-4 h-4" />

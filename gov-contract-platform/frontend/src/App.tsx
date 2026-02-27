@@ -14,6 +14,7 @@ import Reports from './pages/Reports'
 import Notifications from './pages/Notifications'
 import CreateContract from './pages/CreateContract'
 import ProtectedRoute from './components/auth/ProtectedRoute'
+import { setupTokenRefresh } from './services/authService'
 
 // Create axios instance with auth
 const api = axios.create({
@@ -29,6 +30,41 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// Add response interceptor for 401/403 handling
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401) {
+      // Token expired, try to refresh
+      const refreshToken = localStorage.getItem('refresh_token')
+      if (refreshToken && error.config && !error.config._retry) {
+        error.config._retry = true
+        try {
+          const response = await axios.post('/api/v1/auth/refresh', {
+            refresh_token: refreshToken
+          })
+          const { access_token } = response.data
+          localStorage.setItem('access_token', access_token)
+          error.config.headers.Authorization = `Bearer ${access_token}`
+          return api(error.config)
+        } catch (refreshError) {
+          // Refresh failed, logout
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+          window.location.href = '/login'
+          return Promise.reject(refreshError)
+        }
+      } else {
+        // No refresh token, redirect to login
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
 function App() {
   useEffect(() => {
     const theme = localStorage.getItem('theme')
@@ -41,6 +77,9 @@ function App() {
     if (density) {
       document.documentElement.setAttribute('data-density', density)
     }
+
+    // Setup auto token refresh
+    setupTokenRefresh()
   }, [])
 
   return (
