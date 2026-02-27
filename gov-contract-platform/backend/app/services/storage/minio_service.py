@@ -9,6 +9,7 @@ from minio import Minio
 from minio.error import S3Error
 import mimetypes
 import logging
+from urllib.parse import quote, unquote
 
 from app.core.config import settings
 
@@ -46,7 +47,10 @@ class MinIOService:
         folder: str = "documents",
         metadata: Optional[dict] = None
     ) -> dict:
-        """Upload file to MinIO"""
+        """Upload file to MinIO
+        
+        Supports UTF-8 filenames by URL-encoding metadata values
+        """
         try:
             ext = filename.split('.')[-1].lower() if '.' in filename else ''
             object_name = f"{folder}/{uuid.uuid4()}.{ext}" if ext else f"{folder}/{uuid.uuid4()}"
@@ -58,13 +62,27 @@ class MinIOService:
             file_size = file_data.tell()
             file_data.seek(0)
             
+            # Encode metadata values to handle UTF-8 characters (Thai, etc.)
+            # MinIO metadata only supports ASCII, so we URL-encode non-ASCII characters
+            encoded_metadata = {}
+            if metadata:
+                for key, value in metadata.items():
+                    if isinstance(value, str):
+                        # URL-encode UTF-8 characters, keep ASCII as-is
+                        encoded_metadata[key] = quote(value.encode('utf-8'), safe='')
+                    else:
+                        encoded_metadata[key] = value
+            
+            # Always store original filename (URL-encoded)
+            encoded_metadata['original-filename'] = quote(filename.encode('utf-8'), safe='')
+            
             self.client.put_object(
                 bucket_name=self.bucket,
                 object_name=object_name,
                 data=file_data,
                 length=file_size,
                 content_type=content_type,
-                metadata=metadata or {}
+                metadata=encoded_metadata
             )
             
             logger.info(f"Uploaded file: {object_name} ({file_size} bytes)")
@@ -96,6 +114,31 @@ class MinIOService:
         except S3Error as e:
             logger.error(f"Error generating presigned URL: {e}")
             raise
+    
+    def get_object_metadata(self, object_name: str) -> dict:
+        """Get object metadata with UTF-8 decoded values
+        
+        Decodes URL-encoded metadata values back to UTF-8 strings
+        """
+        try:
+            stat = self.client.stat_object(self.bucket, object_name)
+            metadata = stat.metadata or {}
+            
+            # Decode URL-encoded metadata values
+            decoded_metadata = {}
+            for key, value in metadata.items():
+                if isinstance(value, str):
+                    try:
+                        decoded_metadata[key] = unquote(value)
+                    except:
+                        decoded_metadata[key] = value
+                else:
+                    decoded_metadata[key] = value
+            
+            return decoded_metadata
+        except S3Error as e:
+            logger.error(f"Error getting metadata: {e}")
+            return {}
     
     def get_file_stream(self, object_name: str):
         """Get file as stream for proxy download (no expiration)
