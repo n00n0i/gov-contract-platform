@@ -80,8 +80,12 @@ class MinIOService:
             logger.error(f"Error uploading file: {e}")
             raise
     
-    def get_presigned_url(self, object_name: str, expires: int = 3600) -> str:
-        """Generate presigned URL for file access"""
+    def get_presigned_url(self, object_name: str, expires: int = 604800) -> str:
+        """Generate presigned URL for file access
+        
+        Default expires: 7 days (604800 seconds) - same as JWT token
+        Max allowed by MinIO: 7 days
+        """
         try:
             url = self.client.presigned_get_object(
                 bucket_name=self.bucket,
@@ -91,6 +95,18 @@ class MinIOService:
             return url
         except S3Error as e:
             logger.error(f"Error generating presigned URL: {e}")
+            raise
+    
+    def get_file_stream(self, object_name: str):
+        """Get file as stream for proxy download (no expiration)
+        
+        Use this when you need permanent access via backend proxy
+        """
+        try:
+            response = self.client.get_object(self.bucket, object_name)
+            return response
+        except S3Error as e:
+            logger.error(f"Error getting file stream: {e}")
             raise
     
     def download_file(self, object_name: str) -> bytes:

@@ -18,9 +18,10 @@ engine = create_engine(
     poolclass=QueuePool,
     pool_size=settings.DATABASE_POOL_SIZE,
     max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_pre_ping=True,  # Verify connections before using
-    pool_recycle=3600,   # Recycle connections after 1 hour
-    echo=settings.DEBUG  # Log SQL queries in debug mode
+    pool_pre_ping=True,      # Verify connections before using (prevents stale connections)
+    pool_recycle=604800,     # Recycle connections after 7 days (same as JWT token)
+    pool_timeout=60,         # Wait up to 60 seconds for available connection
+    echo=settings.DEBUG      # Log SQL queries in debug mode
 )
 
 # Session factory
