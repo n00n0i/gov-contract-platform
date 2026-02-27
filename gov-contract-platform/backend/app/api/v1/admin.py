@@ -4,15 +4,26 @@ Admin API Routes - Storage and System Management
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional, List
+from pydantic import BaseModel
 import logging
 
 from app.db.database import get_db
 from app.core.security import get_current_user_id, get_current_user_payload
 from app.core.logging import get_logger
 from app.services.storage.minio_service import get_storage_service
+from datetime import datetime
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 logger = get_logger(__name__)
+
+
+class BulkDeleteRequest(BaseModel):
+    file_ids: List[str]
+
+
+class FileActionRequest(BaseModel):
+    file_id: str
+    action: str  # reprocess, create_graph
 
 
 @router.get("/storage/minio/stats")
@@ -67,6 +78,257 @@ async def get_minio_stats(
     except Exception as e:
         logger.error(f"MinIO stats error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get MinIO stats: {str(e)}")
+
+
+@router.get("/storage/minio/files")
+async def get_minio_files(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Get list of files in MinIO storage
+    
+    Returns paginated list of files with metadata.
+    """
+    try:
+        from app.models.contract import ContractAttachment
+        from app.models.contract import Contract  # For contract name lookup
+        
+        # Calculate offset
+        offset = (page - 1) * limit
+        
+        # Query files
+        query = db.query(ContractAttachment).filter(
+            ContractAttachment.is_deleted == 0
+        ).order_by(ContractAttachment.created_at.desc())
+        
+        total = query.count()
+        files = query.offset(offset).limit(limit).all()
+        
+        # Format response
+        file_list = []
+        for file in files:
+            # Get contract name if available
+            contract_name = None
+            if file.contract_id:
+                contract = db.query(Contract).filter(
+                    Contract.id == file.contract_id
+                ).first()
+                if contract:
+                    contract_name = contract.contract_number
+            
+            file_list.append({
+                "id": str(file.id),
+                "filename": file.filename,
+                "document_type": file.document_type,
+                "file_size": file.file_size,
+                "created_at": file.created_at.isoformat() if file.created_at else None,
+                "contract_name": contract_name,
+                "ocr_status": file.ocr_status or "pending",
+                "storage_path": file.storage_path,
+                "storage_bucket": file.storage_bucket
+            })
+        
+        return {
+            "success": True,
+            "files": file_list,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": (total + limit - 1) // limit
+        }
+    except Exception as e:
+        logger.error(f"Failed to get file list: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get file list: {str(e)}")
+
+
+@router.post("/storage/minio/files/{file_id}/reprocess")
+async def reprocess_file(
+    file_id: str,
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Re-process OCR for a file
+    
+    Queues the file for OCR processing again.
+    """
+    try:
+        from app.models.contract import ContractAttachment
+        from app.tasks.document import process_document_ocr
+        
+        # Get file
+        file = db.query(ContractAttachment).filter(
+            ContractAttachment.id == file_id,
+            ContractAttachment.is_deleted == 0
+        ).first()
+        
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Reset OCR status
+        file.ocr_status = "pending"
+        file.ocr_error = None
+        db.commit()
+        
+        # Queue OCR task
+        tenant_id = user_payload.get('tenant_id') if user_payload else None
+        task = process_document_ocr.delay(file_id, tenant_id)
+        
+        return {
+            "success": True,
+            "message": "File queued for reprocessing",
+            "file_id": file_id,
+            "task_id": task.id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to reprocess file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reprocess file: {str(e)}")
+
+
+@router.post("/storage/minio/files/{file_id}/graph")
+async def create_file_graph(
+    file_id: str,
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Create GraphRAG for a file
+    
+    Extracts entities and relationships from file's extracted text.
+    """
+    try:
+        from app.models.contract import ContractAttachment
+        from app.tasks.document import process_graphrag_extraction
+        
+        # Get file
+        file = db.query(ContractAttachment).filter(
+            ContractAttachment.id == file_id,
+            ContractAttachment.is_deleted == 0
+        ).first()
+        
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        if file.ocr_status != "completed":
+            raise HTTPException(
+                status_code=400, 
+                detail="File must be OCR completed before creating graph. Please reprocess first."
+            )
+        
+        if not file.extracted_text:
+            raise HTTPException(
+                status_code=400,
+                detail="No extracted text available for graph creation"
+            )
+        
+        # Queue GraphRAG task
+        tenant_id = user_payload.get('tenant_id') if user_payload else None
+        task = process_graphrag_extraction.delay(file_id, tenant_id)
+        
+        return {
+            "success": True,
+            "message": "Graph creation queued",
+            "file_id": file_id,
+            "task_id": task.id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create graph for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create graph: {str(e)}")
+
+
+@router.post("/storage/minio/files/bulk-delete")
+async def bulk_delete_files(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Bulk delete files from MinIO storage
+    
+    Soft deletes files, removes them from MinIO, and deletes RAG chunks.
+    """
+    try:
+        from app.models.contract import ContractAttachment
+        
+        deleted_count = 0
+        errors = []
+        
+        storage = get_storage_service()
+        
+        for file_id in request.file_ids:
+            try:
+                file = db.query(ContractAttachment).filter(
+                    ContractAttachment.id == file_id,
+                    ContractAttachment.is_deleted == 0
+                ).first()
+                
+                if not file:
+                    errors.append({"id": file_id, "error": "File not found"})
+                    continue
+                
+                # Delete RAG chunks first (if any)
+                try:
+                    await _delete_rag_chunks(file_id, db)
+                except Exception as e:
+                    logger.warning(f"Failed to delete RAG chunks for {file_id}: {e}")
+                    # Continue even if RAG delete fails
+                
+                # Delete from MinIO if storage_path exists
+                if file.storage_path:
+                    try:
+                        storage.delete_file(file.storage_path)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete file from MinIO: {e}")
+                        # Continue with soft delete even if MinIO delete fails
+                
+                # Soft delete in database
+                file.is_deleted = 1
+                file.deleted_at = datetime.utcnow()
+                file.deleted_by = user_payload.get('sub')
+                
+                deleted_count += 1
+            except Exception as e:
+                logger.error(f"Failed to delete file {file_id}: {e}")
+                errors.append({"id": file_id, "error": str(e)})
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "total_requested": len(request.file_ids),
+            "errors": errors
+        }
+    except Exception as e:
+        logger.error(f"Bulk delete failed: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Bulk delete failed: {str(e)}")
+
+
+async def _delete_rag_chunks(file_id: str, db: Session):
+    """
+    Delete RAG chunks for a file
+    
+    Deletes from pgvector table if exists.
+    """
+    try:
+        # Try to delete from document_chunks table if exists
+        db.execute(
+            "DELETE FROM document_chunks WHERE document_id = :file_id",
+            {"file_id": file_id}
+        )
+        db.commit()
+        logger.info(f"Deleted RAG chunks for file {file_id}")
+    except Exception as e:
+        # Table might not exist or other error
+        logger.warning(f"Could not delete RAG chunks: {e}")
 
 
 @router.post("/storage/minio/config")

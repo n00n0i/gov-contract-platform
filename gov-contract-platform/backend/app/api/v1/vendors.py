@@ -150,7 +150,7 @@ async def create_vendor(
         if vendor_data.get("tax_id"):
             existing = db.query(Vendor).filter(
                 Vendor.tax_id == vendor_data["tax_id"],
-                Vendor.is_deleted == False
+                Vendor.is_deleted == 0
             ).first()
             if existing:
                 raise HTTPException(status_code=400, detail="Vendor with this tax ID already exists")
@@ -330,7 +330,7 @@ async def get_vendor_stats(
 ):
     """Get vendor statistics"""
     
-    base_query = db.query(Vendor).filter(Vendor.is_deleted == False)
+    base_query = db.query(Vendor).filter(Vendor.is_deleted == 0)
     
     total = base_query.count()
     active = base_query.filter(Vendor.status == VendorStatus.ACTIVE).count()

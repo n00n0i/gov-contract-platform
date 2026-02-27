@@ -9,7 +9,8 @@ import {
   Bot, FileStack, Copy, Plus, Trash2, Edit3, Play, Pause,
   Settings2, Workflow, Cpu, MessagesSquare, Key, Settings as SettingsIcon, Clock,
   BookOpen, X, Users, UserPlus, UserCog, Building2, ChevronRight, ChevronDown, FolderTree, Zap,
-  HardDrive, FileArchive, BrainCircuit, DatabaseBackup, Layers
+  HardDrive, FileArchive, BrainCircuit, DatabaseBackup, Layers,
+  Loader2
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
@@ -4795,6 +4796,24 @@ function StorageSettings() {
   const [retentionDays, setRetentionDays] = useState(2555) // 7 years default
   const [autoCleanup, setAutoCleanup] = useState(false)
 
+  // File List Modal State
+  const [showFileModal, setShowFileModal] = useState(false)
+  const [fileList, setFileList] = useState<Array<{
+    id: string
+    filename: string
+    document_type: string
+    file_size: number
+    created_at: string
+    contract_name?: string
+    ocr_status: string
+  }>>([])
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
+  const [fileListLoading, setFileListLoading] = useState(false)
+  const [fileListPage, setFileListPage] = useState(1)
+  const [fileListTotal, setFileListTotal] = useState(0)
+  const [actionLoading, setActionLoading] = useState<string | null>(null) // file_id being processed
+  const FILE_LIST_LIMIT = 20
+
   useEffect(() => {
     fetchMinioStats()
     fetchRagStats()
@@ -4999,6 +5018,177 @@ function StorageSettings() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
+  // File List Functions
+  const fetchFileList = async (page = 1) => {
+    setFileListLoading(true)
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch(`/api/v1/admin/storage/minio/files?page=${page}&limit=${FILE_LIST_LIMIT}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
+      if (response.ok) {
+        const data = await response.json()
+        setFileList(data.files || [])
+        setFileListTotal(data.total || 0)
+        setFileListPage(page)
+      } else {
+        setMessage({ type: 'error', text: 'ไม่สามารถโหลดรายการไฟล์ได้' })
+      }
+    } catch (err) {
+      console.error('Failed to fetch file list:', err)
+      setMessage({ type: 'error', text: 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้' })
+    } finally {
+      setFileListLoading(false)
+    }
+  }
+
+  const openFileModal = () => {
+    setShowFileModal(true)
+    setSelectedFiles(new Set())
+    fetchFileList(1)
+  }
+
+  const closeFileModal = () => {
+    setShowFileModal(false)
+    setSelectedFiles(new Set())
+    setFileList([])
+  }
+
+  const toggleFileSelection = (fileId: string) => {
+    const newSelected = new Set(selectedFiles)
+    if (newSelected.has(fileId)) {
+      newSelected.delete(fileId)
+    } else {
+      newSelected.add(fileId)
+    }
+    setSelectedFiles(newSelected)
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedFiles.size === fileList.length) {
+      setSelectedFiles(new Set())
+    } else {
+      setSelectedFiles(new Set(fileList.map(f => f.id)))
+    }
+  }
+
+  const handleDeleteSelectedFiles = async () => {
+    if (selectedFiles.size === 0) return
+    
+    if (!confirm(`คุณต้องการลบไฟล์ที่เลือก ${selectedFiles.size} รายการใช่หรือไม่?`)) {
+      return
+    }
+
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch('/api/v1/admin/storage/minio/files/bulk-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ file_ids: Array.from(selectedFiles) })
+      })
+
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
+
+      if (response.ok) {
+        const result = await response.json()
+        setMessage({ type: 'success', text: `ลบสำเร็จ ${result.deleted_count || selectedFiles.size} รายการ` })
+        setSelectedFiles(new Set())
+        fetchFileList(fileListPage)
+        fetchMinioStats() // Refresh stats
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ type: 'error', text: 'ไม่สามารถลบไฟล์ได้' })
+      }
+    } catch (err) {
+      console.error('Failed to delete files:', err)
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการลบไฟล์' })
+    }
+  }
+
+  // Re-process OCR for a file
+  const handleReprocessFile = async (fileId: string) => {
+    setActionLoading(fileId)
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch(`/api/v1/admin/storage/minio/files/${fileId}/reprocess`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
+
+      if (response.ok) {
+        const result = await response.json()
+        setMessage({ type: 'success', text: `ส่งไฟล์ไปประมวลผลใหม่แล้ว (Task: ${result.task_id?.slice(0, 8)}...)` })
+        // Refresh file list after a short delay
+        setTimeout(() => fetchFileList(fileListPage), 1000)
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        const error = await response.json()
+        setMessage({ type: 'error', text: error.detail || 'ไม่สามารถประมวลผลไฟล์ได้' })
+      }
+    } catch (err) {
+      console.error('Failed to reprocess file:', err)
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการประมวลผลไฟล์' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // Create GraphRAG for a file
+  const handleCreateGraph = async (fileId: string) => {
+    setActionLoading(fileId)
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch(`/api/v1/admin/storage/minio/files/${fileId}/graph`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
+
+      if (response.ok) {
+        const result = await response.json()
+        setMessage({ type: 'success', text: `สร้าง Graph แล้ว (Task: ${result.task_id?.slice(0, 8)}...)` })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        const error = await response.json()
+        setMessage({ type: 'error', text: error.detail || 'ไม่สามารถสร้าง Graph ได้' })
+      }
+    } catch (err) {
+      console.error('Failed to create graph:', err)
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการสร้าง Graph' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -5070,10 +5260,14 @@ function StorageSettings() {
                 <p className="text-sm text-gray-600 mb-1">พื้นที่ใช้งานทั้งหมด</p>
                 <p className="text-2xl font-bold text-blue-700">{minioLoading ? '...' : formatSize(minioStats.totalSize)}</p>
               </div>
-              <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+              <button
+                onClick={openFileModal}
+                className="bg-green-50 rounded-lg p-4 border border-green-100 text-left hover:bg-green-100 transition cursor-pointer"
+              >
                 <p className="text-sm text-gray-600 mb-1">จำนวนไฟล์</p>
                 <p className="text-2xl font-bold text-green-700">{minioLoading ? '...' : minioStats.documentCount.toLocaleString()}</p>
-              </div>
+                <p className="text-xs text-green-600 mt-1">คลิกเพื่อดูรายการ</p>
+              </button>
               <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
                 <p className="text-sm text-gray-600 mb-1">Bucket</p>
                 <p className="text-lg font-bold text-purple-700">{minioStats.bucketName}</p>
@@ -5437,6 +5631,202 @@ function StorageSettings() {
           </div>
         </div>
       </div>
+
+      {/* File List Modal */}
+      {showFileModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[85vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b">
+              <div>
+                <h3 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                  <FileArchive className="w-6 h-6 text-green-600" />
+                  รายการไฟล์ทั้งหมด
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  เลือกไฟล์เพื่อลบ (เลือกได้หลายไฟล์)
+                </p>
+              </div>
+              <button
+                onClick={closeFileModal}
+                className="p-2 hover:bg-gray-100 rounded-lg transition"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-auto p-6">
+              {fileListLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  <span className="ml-3 text-gray-600">กำลังโหลด...</span>
+                </div>
+              ) : fileList.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <FileArchive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p>ไม่พบไฟล์</p>
+                </div>
+              ) : (
+                <>
+                  {/* Select All Header */}
+                  <div className="flex items-center justify-between mb-4 pb-4 border-b">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedFiles.size === fileList.length && fileList.length > 0}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                      <span className="text-sm font-medium text-gray-700">
+                        เลือกทั้งหมด ({selectedFiles.size}/{fileList.length})
+                      </span>
+                    </label>
+                    <span className="text-sm text-gray-500">
+                      แสดง {fileList.length} จาก {fileListTotal} รายการ
+                    </span>
+                  </div>
+
+                  {/* File List */}
+                  <div className="space-y-2">
+                    {fileList.map((file) => (
+                      <div
+                        key={file.id}
+                        className={`flex items-center gap-4 p-4 rounded-lg border transition ${
+                          selectedFiles.has(file.id)
+                            ? 'bg-blue-50 border-blue-300'
+                            : 'bg-white border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedFiles.has(file.id)}
+                          onChange={() => toggleFileSelection(file.id)}
+                          className="w-4 h-4 text-blue-600 rounded"
+                        />
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-gray-400" />
+                            <p className="font-medium text-gray-900 truncate">{file.filename}</p>
+                          </div>
+                          <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
+                            <span>{file.document_type}</span>
+                            <span>•</span>
+                            <span>{formatSize(file.file_size || 0)}</span>
+                            <span>•</span>
+                            <span>{new Date(file.created_at).toLocaleDateString('th-TH')}</span>
+                            {file.contract_name && (
+                              <>
+                                <span>•</span>
+                                <span className="text-blue-600 truncate max-w-[200px]">{file.contract_name}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {/* Status Badge */}
+                          <span className={`px-2 py-1 text-xs rounded-full ${
+                            file.ocr_status === 'completed' ? 'bg-green-100 text-green-700' :
+                            file.ocr_status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
+                            file.ocr_status === 'failed' ? 'bg-red-100 text-red-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {file.ocr_status === 'completed' ? 'ประมวลผลแล้ว' :
+                             file.ocr_status === 'processing' ? 'กำลังประมวลผล' :
+                             file.ocr_status === 'failed' ? 'ล้มเหลว' :
+                             'รอดำเนินการ'}
+                          </span>
+                          
+                          {/* Action Buttons */}
+                          {(file.ocr_status === 'pending' || file.ocr_status === 'failed') && (
+                            <button
+                              onClick={() => handleReprocessFile(file.id)}
+                              disabled={actionLoading === file.id}
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition disabled:opacity-50"
+                              title="ประมวลผลอีกครั้ง"
+                            >
+                              {actionLoading === file.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Play className="w-3 h-3" />
+                              )}
+                              ดำเนินการ
+                            </button>
+                          )}
+                          
+                          {file.ocr_status === 'completed' && (
+                            <button
+                              onClick={() => handleCreateGraph(file.id)}
+                              disabled={actionLoading === file.id}
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition disabled:opacity-50"
+                              title="สร้าง Graph"
+                            >
+                              {actionLoading === file.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <BrainCircuit className="w-3 h-3" />
+                              )}
+                              สร้าง Graph
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pagination */}
+                  {fileListTotal > FILE_LIST_LIMIT && (
+                    <div className="flex items-center justify-center gap-2 mt-6 pt-4 border-t">
+                      <button
+                        onClick={() => fetchFileList(fileListPage - 1)}
+                        disabled={fileListPage === 1 || fileListLoading}
+                        className="px-3 py-1 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        ก่อนหน้า
+                      </button>
+                      <span className="text-sm text-gray-600">
+                        หน้า {fileListPage} / {Math.ceil(fileListTotal / FILE_LIST_LIMIT)}
+                      </span>
+                      <button
+                        onClick={() => fetchFileList(fileListPage + 1)}
+                        disabled={fileListPage >= Math.ceil(fileListTotal / FILE_LIST_LIMIT) || fileListLoading}
+                        className="px-3 py-1 rounded border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        ถัดไป
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between p-6 border-t bg-gray-50 rounded-b-xl">
+              <span className="text-sm text-gray-600">
+                เลือก {selectedFiles.size} รายการ
+              </span>
+              <div className="flex gap-3">
+                <button
+                  onClick={closeFileModal}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition"
+                >
+                  ปิด
+                </button>
+                <button
+                  onClick={handleDeleteSelectedFiles}
+                  disabled={selectedFiles.size === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  ลบที่เลือก ({selectedFiles.size})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
