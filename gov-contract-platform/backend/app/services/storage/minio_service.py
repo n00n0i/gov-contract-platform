@@ -28,24 +28,28 @@ class MinIOService:
             secure=settings.MINIO_SECURE
         )
         
-        # Client for public presigned URLs (browser accessible)
-        self.public_client = None
-        if settings.MINIO_PUBLIC_URL and settings.MINIO_PUBLIC_URL != settings.MINIO_ENDPOINT:
-            # Parse public URL to get host/port
+        # Public client is created lazily when needed
+        self._public_client = None
+        
+        self.bucket = settings.STORAGE_BUCKET
+        self._ensure_bucket()
+    
+    @property
+    def public_client(self):
+        """Lazy initialization of public client for presigned URLs"""
+        if self._public_client is None and settings.MINIO_PUBLIC_URL and settings.MINIO_PUBLIC_URL != settings.MINIO_ENDPOINT:
             from urllib.parse import urlparse
             public_url = urlparse(settings.MINIO_PUBLIC_URL)
             public_endpoint = public_url.netloc or public_url.path
             public_secure = public_url.scheme == 'https'
             
-            self.public_client = Minio(
+            self._public_client = Minio(
                 public_endpoint,
                 access_key=settings.MINIO_ACCESS_KEY,
                 secret_key=settings.MINIO_SECRET_KEY,
                 secure=public_secure
             )
-        
-        self.bucket = settings.STORAGE_BUCKET
-        self._ensure_bucket()
+        return self._public_client
     
     def _ensure_bucket(self):
         """Ensure bucket exists"""
