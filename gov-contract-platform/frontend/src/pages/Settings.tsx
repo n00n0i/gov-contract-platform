@@ -4803,13 +4803,26 @@ function StorageSettings() {
   const fetchMinioStats = async () => {
     setMinioLoading(true)
     try {
-      const response = await fetch('/api/v1/admin/storage/minio/stats')
+      const token = localStorage.getItem('access_token')
+      const response = await fetch('/api/v1/admin/storage/minio/stats', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
       if (response.ok) {
         const data = await response.json()
         setMinioStats(data)
+      } else {
+        setMessage({ type: 'error', text: 'ไม่สามารถโหลดข้อมูล MinIO ได้' })
       }
     } catch (err) {
       console.error('Failed to fetch MinIO stats:', err)
+      setMessage({ type: 'error', text: 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้' })
     } finally {
       setMinioLoading(false)
     }
@@ -4818,10 +4831,22 @@ function StorageSettings() {
   const fetchRagStats = async () => {
     setRagLoading(true)
     try {
-      const response = await fetch('/api/v1/admin/storage/rag/stats')
+      const token = localStorage.getItem('access_token')
+      const response = await fetch('/api/v1/admin/storage/rag/stats', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
       if (response.ok) {
         const data = await response.json()
         setRagStats(data)
+      } else {
+        setMessage({ type: 'error', text: 'ไม่สามารถโหลดข้อมูล RAG ได้' })
       }
     } catch (err) {
       console.error('Failed to fetch RAG stats:', err)
@@ -4832,11 +4857,20 @@ function StorageSettings() {
 
   const handleSaveMinioConfig = async () => {
     try {
+      const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/minio/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(minioConfig)
       })
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
       if (response.ok) {
         setMessage({ type: 'success', text: 'บันทึกการตั้งค่า MinIO สำเร็จ' })
         setTimeout(() => setMessage(null), 3000)
@@ -4850,11 +4884,20 @@ function StorageSettings() {
 
   const handleSaveRagConfig = async () => {
     try {
+      const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/rag/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(ragConfig)
       })
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
       if (response.ok) {
         setMessage({ type: 'success', text: 'บันทึกการตั้งค่า RAG Storage สำเร็จ' })
         setTimeout(() => setMessage(null), 3000)
@@ -4868,16 +4911,26 @@ function StorageSettings() {
 
   const handleTestMinioConnection = async () => {
     try {
+      const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/minio/test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(minioConfig)
       })
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
       if (response.ok) {
         setMessage({ type: 'success', text: 'ทดสอบการเชื่อมต่อ MinIO สำเร็จ' })
         setTimeout(() => setMessage(null), 3000)
       } else {
-        setMessage({ type: 'error', text: 'ไม่สามารถเชื่อมต่อ MinIO ได้' })
+        const data = await response.json()
+        setMessage({ type: 'error', text: data.message || 'ไม่สามารถเชื่อมต่อ MinIO ได้' })
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ MinIO' })
@@ -4886,16 +4939,26 @@ function StorageSettings() {
 
   const handleTestRagConnection = async () => {
     try {
+      const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/rag/test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(ragConfig)
       })
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
       if (response.ok) {
         setMessage({ type: 'success', text: 'ทดสอบการเชื่อมต่อ RAG Storage สำเร็จ' })
         setTimeout(() => setMessage(null), 3000)
       } else {
-        setMessage({ type: 'error', text: 'ไม่สามารถเชื่อมต่อ RAG Storage ได้' })
+        const data = await response.json()
+        setMessage({ type: 'error', text: data.message || 'ไม่สามารถเชื่อมต่อ RAG Storage ได้' })
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ RAG' })
@@ -4904,7 +4967,18 @@ function StorageSettings() {
 
   const handleSyncRag = async () => {
     try {
-      const response = await fetch('/api/v1/admin/storage/rag/sync', { method: 'POST' })
+      const token = localStorage.getItem('access_token')
+      const response = await fetch('/api/v1/admin/storage/rag/sync', { 
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
       if (response.ok) {
         setMessage({ type: 'success', text: 'เริ่มการซิงค์ข้อมูล RAG แล้ว' })
         setTimeout(() => setMessage(null), 3000)
