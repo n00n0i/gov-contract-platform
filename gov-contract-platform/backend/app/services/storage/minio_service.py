@@ -20,12 +20,30 @@ class MinIOService:
     """MinIO object storage service"""
     
     def __init__(self):
+        # Client for internal operations (Docker network)
         self.client = Minio(
             settings.MINIO_ENDPOINT,
             access_key=settings.MINIO_ACCESS_KEY,
             secret_key=settings.MINIO_SECRET_KEY,
             secure=settings.MINIO_SECURE
         )
+        
+        # Client for public presigned URLs (browser accessible)
+        self.public_client = None
+        if settings.MINIO_PUBLIC_URL and settings.MINIO_PUBLIC_URL != settings.MINIO_ENDPOINT:
+            # Parse public URL to get host/port
+            from urllib.parse import urlparse
+            public_url = urlparse(settings.MINIO_PUBLIC_URL)
+            public_endpoint = public_url.netloc or public_url.path
+            public_secure = public_url.scheme == 'https'
+            
+            self.public_client = Minio(
+                public_endpoint,
+                access_key=settings.MINIO_ACCESS_KEY,
+                secret_key=settings.MINIO_SECRET_KEY,
+                secure=public_secure
+            )
+        
         self.bucket = settings.STORAGE_BUCKET
         self._ensure_bucket()
     
@@ -104,35 +122,17 @@ class MinIOService:
         Default expires: 7 days (604800 seconds) - same as JWT token
         Max allowed by MinIO: 7 days
         
-        Uses MINIO_PUBLIC_URL for browser-accessible links.
+        Uses public_client if configured for browser-accessible links.
         """
-        from app.core.config import settings
-        
         try:
-            # Generate presigned URL
-            url = self.client.presigned_get_object(
+            # Use public client if available, otherwise use internal client
+            client = self.public_client if self.public_client else self.client
+            
+            url = client.presigned_get_object(
                 bucket_name=self.bucket,
                 object_name=object_name,
                 expires=timedelta(seconds=expires)
             )
-            
-            # Replace internal endpoint with public URL if configured
-            if settings.MINIO_PUBLIC_URL and settings.MINIO_PUBLIC_URL != settings.MINIO_ENDPOINT:
-                # Parse the generated URL and replace the host
-                from urllib.parse import urlparse, urlunparse
-                parsed = urlparse(url)
-                public_parsed = urlparse(settings.MINIO_PUBLIC_URL)
-                
-                # Build new URL with public host/port
-                new_url = urlunparse((
-                    public_parsed.scheme or parsed.scheme,
-                    public_parsed.netloc or parsed.netloc,
-                    parsed.path,
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment
-                ))
-                return new_url
             
             return url
         except S3Error as e:
