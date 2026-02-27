@@ -84,7 +84,14 @@ async def upload_document(
         
         # Trigger agent workflows
         try:
-            await on_document_upload(document.id, db)
+            await on_document_upload(
+                document_id=document.id,
+                file_name=file.filename,
+                file_type=document.file_type or file.content_type or 'unknown',
+                file_size=document.file_size or 0,
+                user_id=user_id,
+                db=db
+            )
         except Exception as e:
             logger.error(f"Agent trigger failed: {e}")
         
@@ -353,7 +360,7 @@ def get_ocr_status(
             detail="Document not found"
         )
     
-    return {
+    response = {
         "document_id": document_id,
         "ocr_status": document.ocr_status,
         "ocr_confidence": document.ocr_confidence,
@@ -361,6 +368,12 @@ def get_ocr_status(
         "extracted_text_length": len(document.extracted_text) if document.extracted_text else 0,
         "has_extracted_data": document.extracted_data is not None
     }
+    
+    # Include extracted_data when OCR is completed
+    if document.ocr_status == "completed" and document.extracted_data:
+        response["extracted_data"] = document.extracted_data
+    
+    return response
 
 
 @router.post("/{document_id}/reprocess-ocr")

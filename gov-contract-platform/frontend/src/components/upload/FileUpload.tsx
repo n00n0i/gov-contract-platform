@@ -179,7 +179,7 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
           return
         }
 
-        const response = await api.get(`/documents/${documentId}/ocr-result`)
+        const response = await api.get(`/documents/${documentId}/ocr-status`)
         const { ocr_status, extracted_data } = response.data
 
         if (ocr_status === 'completed') {
