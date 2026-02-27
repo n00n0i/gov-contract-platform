@@ -42,17 +42,16 @@ def process_document_ocr(self, document_id: str, tenant_id: str = None) -> Dict[
                 "status": "success",
                 "document_id": document_id,
                 "confidence": result.confidence,
-                "pages": result.pages,
                 "text_length": len(result.text) if result.text else 0,
                 "graphrag_queued": True
             }
         else:
-            logger.error(f"[OCR Task] Failed for document {document_id}: {result.error_message}")
+            logger.error(f"[OCR Task] Failed for document {document_id}: {result.error}")
             # Don't retry on OCR failure, it's usually a content issue
             return {
                 "status": "failed",
                 "document_id": document_id,
-                "error": result.error_message
+                "error": result.error
             }
             
     except Exception as exc:
