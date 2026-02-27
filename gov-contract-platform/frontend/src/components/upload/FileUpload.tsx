@@ -1,6 +1,17 @@
 import { useState, useCallback } from 'react'
-import { Upload, File, X, Loader2, CheckCircle, AlertCircle, FileText, Image, FileSpreadsheet } from 'lucide-react'
+import { Upload, File, X, Loader2, CheckCircle, AlertCircle, FileText, Image, FileSpreadsheet, Edit2, Save } from 'lucide-react'
 import axios from 'axios'
+
+interface ExtractedDocumentData {
+  contract_number?: string
+  counterparty?: string
+  contract_type?: string
+  contract_value?: number
+  project_name?: string
+  start_date?: string
+  end_date?: string
+  duration_months?: number
+}
 
 interface UploadFile {
   id: string
@@ -10,12 +21,13 @@ interface UploadFile {
   progress: number
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error'
   documentId?: string
-  extractedData?: any
+  extractedData?: ExtractedDocumentData
+  editedData?: ExtractedDocumentData
   error?: string
 }
 
 interface FileUploadProps {
-  onUploadComplete?: (documentId: string, extractedData?: any) => void
+  onUploadComplete?: (documentId: string, extractedData?: ExtractedDocumentData) => void
   onRemove?: () => void
   documentType?: string
   contractId?: string
@@ -48,6 +60,8 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
   const [files, setFiles] = useState<UploadFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [showExtractedData, setShowExtractedData] = useState<string | null>(null)
+  const [editingFileId, setEditingFileId] = useState<string | null>(null)
+  const [editFormData, setEditFormData] = useState<ExtractedDocumentData>({})
 
   const getFileIcon = (type: string) => {
     if (type.includes('pdf')) return <FileText className="w-8 h-8 text-red-500" />
@@ -226,17 +240,59 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
     addFiles(e.dataTransfer.files)
   }
 
-  const formatExtractedData = (data: any) => {
+  const formatExtractedData = (data: ExtractedDocumentData | undefined) => {
     if (!data) return null
     
     const items = []
     if (data.contract_number) items.push({ label: 'เลขที่สัญญา', value: data.contract_number })
-    if (data.contract_value) items.push({ label: 'มูลค่าสัญญา', value: `฿${data.contract_value.toLocaleString()}` })
-    if (data.start_date) items.push({ label: 'วันเริ่มสัญญา', value: data.start_date })
-    if (data.end_date) items.push({ label: 'วันสิ้นสุด', value: data.end_date })
+    if (data.counterparty) items.push({ label: 'คู่สัญญา', value: data.counterparty })
+    if (data.contract_type) items.push({ label: 'ประเภทสัญญา', value: data.contract_type })
+    if (data.contract_value) items.push({ label: 'มูลค่า', value: `฿${data.contract_value.toLocaleString()}` })
     if (data.project_name) items.push({ label: 'ชื่อโครงการ', value: data.project_name })
+    if (data.start_date) items.push({ label: 'วันที่เริ่มต้น', value: data.start_date })
+    if (data.end_date) items.push({ label: 'วันที่สิ้นสุด', value: data.end_date })
+    if (data.duration_months) items.push({ label: 'ระยะเวลา', value: `${data.duration_months} เดือน` })
     
     return items
+  }
+
+  const handleEditClick = (file: UploadFile) => {
+    setEditingFileId(file.id)
+    setEditFormData(file.editedData || file.extractedData || {})
+  }
+
+  const handleSaveEdit = async (fileId: string) => {
+    const file = files.find(f => f.id === fileId)
+    if (!file || !file.documentId) return
+
+    try {
+      // Save to backend
+      await api.patch(`/documents/${file.documentId}/extracted-data`, editFormData)
+      
+      setFiles(prev => prev.map(f => 
+        f.id === fileId 
+          ? { ...f, editedData: editFormData }
+          : f
+      ))
+      setEditingFileId(null)
+      
+      // Notify parent component
+      if (onUploadComplete) {
+        onUploadComplete(file.documentId, editFormData)
+      }
+    } catch (error) {
+      console.error('Failed to save extracted data:', error)
+      alert('ไม่สามารถบันทึกข้อมูลได้')
+    }
+  }
+
+  const handleCancelEdit = () => {
+    setEditingFileId(null)
+    setEditFormData({})
+  }
+
+  const handleInputChange = (field: keyof ExtractedDocumentData, value: string | number) => {
+    setEditFormData(prev => ({ ...prev, [field]: value }))
   }
 
   return (
@@ -350,18 +406,165 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
               {/* Extracted Data */}
               {showExtractedData === file.id && file.extractedData && (
                 <div className="mt-4 p-4 bg-white rounded-lg border border-green-200">
-                  <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-500" />
-                    ข้อมูลที่ดึงออกจากเอกสาร
-                  </h4>
-                  <div className="grid grid-cols-2 gap-3">
-                    {formatExtractedData(file.extractedData)?.map((item, idx) => (
-                      <div key={idx} className="p-2 bg-gray-50 rounded">
-                        <p className="text-xs text-gray-500">{item.label}</p>
-                        <p className="font-medium text-gray-900">{item.value}</p>
-                      </div>
-                    ))}
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-medium text-gray-900 flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                      ข้อมูลที่ดึงออกจากเอกสาร
+                    </h4>
+                    {editingFileId !== file.id && (
+                      <button
+                        onClick={() => handleEditClick(file)}
+                        className="flex items-center gap-1 px-3 py-1 text-sm text-blue-600 hover:bg-blue-100 rounded-lg transition"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                        แก้ไข
+                      </button>
+                    )}
                   </div>
+                  
+                  {editingFileId === file.id ? (
+                    // Edit Form
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        {/* Row 1: Contract Number & Counterparty */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            เลขที่สัญญา
+                          </label>
+                          <input
+                            type="text"
+                            value={editFormData.contract_number || ''}
+                            onChange={(e) => handleInputChange('contract_number', e.target.value)}
+                            placeholder="เช่น CN-2025-001"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            คู่สัญญา
+                          </label>
+                          <input
+                            type="text"
+                            value={editFormData.counterparty || ''}
+                            onChange={(e) => handleInputChange('counterparty', e.target.value)}
+                            placeholder="ชื่อบริษัท/หน่วยงาน"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        
+                        {/* Row 2: Contract Type & Value */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            ประเภทสัญญา
+                          </label>
+                          <input
+                            type="text"
+                            value={editFormData.contract_type || ''}
+                            onChange={(e) => handleInputChange('contract_type', e.target.value)}
+                            placeholder="เช่น จ้างเหมา, ซื้อขาย"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            มูลค่า (บาท)
+                          </label>
+                          <input
+                            type="number"
+                            value={editFormData.contract_value || ''}
+                            onChange={(e) => handleInputChange('contract_value', Number(e.target.value))}
+                            placeholder="เช่น 1500000"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+                      
+                      {/* Row 3: Project Name (Full Width) */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          ชื่อโครงการ
+                        </label>
+                        <input
+                          type="text"
+                          value={editFormData.project_name || ''}
+                          onChange={(e) => handleInputChange('project_name', e.target.value)}
+                          placeholder="เช่น โครงการพัฒนาระบบข้อมูลกลาง"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        {/* Row 4: Start Date & End Date */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            วันที่เริ่มต้นสัญญา
+                          </label>
+                          <input
+                            type="date"
+                            value={editFormData.start_date || ''}
+                            onChange={(e) => handleInputChange('start_date', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            วันที่สิ้นสุดสัญญา
+                          </label>
+                          <input
+                            type="date"
+                            value={editFormData.end_date || ''}
+                            onChange={(e) => handleInputChange('end_date', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        
+                        {/* Row 5: Duration Months & Warranty Months */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            ระยะเวลา (เดือน)
+                          </label>
+                          <input
+                            type="number"
+                            value={editFormData.duration_months || ''}
+                            onChange={(e) => handleInputChange('duration_months', Number(e.target.value))}
+                            placeholder="เช่น 12"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+                      
+                      <p className="text-xs text-gray-500">
+                        * วันที่ใช้รูปแบบ YYYY-MM-DD, ตัวเลขอย่างน้อย 2 ตำแหน่ง
+                      </p>
+                      
+                      {/* Action Buttons */}
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          onClick={() => handleSaveEdit(file.id)}
+                          className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                        >
+                          <Save className="w-4 h-4" />
+                          บันทึก
+                        </button>
+                        <button
+                          onClick={handleCancelEdit}
+                          className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+                        >
+                          ยกเลิก
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    // Display Mode
+                    <div className="grid grid-cols-2 gap-3">
+                      {formatExtractedData(file.editedData || file.extractedData)?.map((item, idx) => (
+                        <div key={idx} className="p-2 bg-gray-50 rounded">
+                          <p className="text-xs text-gray-500">{item.label}</p>
+                          <p className="font-medium text-gray-900">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
