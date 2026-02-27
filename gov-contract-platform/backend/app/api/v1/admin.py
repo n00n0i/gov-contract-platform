@@ -316,19 +316,40 @@ async def _delete_rag_chunks(file_id: str, db: Session):
     """
     Delete RAG chunks for a file
     
-    Deletes from pgvector table if exists.
+    Deletes from pgvector table and resets file's extracted text.
     """
     try:
-        # Try to delete from document_chunks table if exists
-        db.execute(
-            "DELETE FROM document_chunks WHERE document_id = :file_id",
-            {"file_id": file_id}
-        )
+        from app.models.contract import ContractAttachment
+        
+        # 1. Delete from document_chunks table if exists
+        try:
+            result = db.execute(
+                "DELETE FROM document_chunks WHERE document_id = :file_id",
+                {"file_id": file_id}
+            )
+            deleted = result.rowcount if hasattr(result, 'rowcount') else 0
+            logger.info(f"Deleted {deleted} RAG chunks for file {file_id}")
+        except Exception as e:
+            # Table might not exist
+            logger.warning(f"Could not delete from document_chunks: {e}")
+        
+        # 2. Reset extracted text and OCR status in ContractAttachment
+        file = db.query(ContractAttachment).filter(
+            ContractAttachment.id == file_id
+        ).first()
+        
+        if file:
+            file.extracted_text = None
+            file.extracted_data = None
+            file.ocr_status = "pending"
+            file.ocr_confidence = None
+            logger.info(f"Reset OCR data for file {file_id}")
+        
         db.commit()
-        logger.info(f"Deleted RAG chunks for file {file_id}")
     except Exception as e:
-        # Table might not exist or other error
-        logger.warning(f"Could not delete RAG chunks: {e}")
+        logger.error(f"Error deleting RAG chunks for {file_id}: {e}")
+        db.rollback()
+        raise
 
 
 @router.post("/storage/minio/config")
@@ -517,3 +538,125 @@ async def sync_rag_storage(
         "message": "RAG sync queued",
         "job_id": "sync-" + str(hash(str(user_payload.get('sub'))))
     }
+
+
+@router.post("/storage/rag/clear")
+async def clear_rag_storage(
+    confirm: bool = Query(False, description="Confirm deletion"),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Clear RAG storage only
+    
+    Deletes all document chunks and embeddings while keeping files in MinIO.
+    Use this to resync RAG data from scratch.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400, 
+            detail="Please confirm deletion by setting confirm=true"
+        )
+    
+    try:
+        # Delete from document_chunks table
+        result = db.execute("DELETE FROM document_chunks")
+        db.commit()
+        
+        deleted_count = result.rowcount if hasattr(result, 'rowcount') else 0
+        
+        # Reset extracted_text and embeddings references in ContractAttachment
+        from app.models.contract import ContractAttachment
+        db.query(ContractAttachment).update({
+            'extracted_text': None,
+            'ocr_status': 'pending'
+        })
+        db.commit()
+        
+        logger.info(f"RAG storage cleared by {user_payload.get('sub')}: {deleted_count} chunks deleted")
+        
+        return {
+            "success": True,
+            "message": "RAG storage cleared successfully",
+            "deleted_chunks": deleted_count,
+            "note": "Files in MinIO are preserved. OCR status reset to pending for all documents."
+        }
+    except Exception as e:
+        logger.error(f"Failed to clear RAG storage: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to clear RAG storage: {str(e)}")
+
+
+@router.post("/storage/minio/clear")
+async def clear_all_storage(
+    confirm: bool = Query(False, description="Confirm deletion"),
+    delete_files: bool = Query(True, description="Also delete files from MinIO"),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Clear all storage (MinIO + RAG)
+    
+    Deletes all files from MinIO, RAG chunks, and soft-deletes database records.
+    This is a destructive operation - use with caution!
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400, 
+            detail="Please confirm deletion by setting confirm=true"
+        )
+    
+    try:
+        from app.models.contract import ContractAttachment
+        import uuid
+        
+        storage = get_storage_service()
+        deleted_files = 0
+        failed_files = []
+        
+        # Get all non-deleted files
+        files = db.query(ContractAttachment).filter(
+            ContractAttachment.is_deleted == 0
+        ).all()
+        
+        # 1. Delete RAG chunks first
+        try:
+            db.execute("DELETE FROM document_chunks")
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Could not delete RAG chunks: {e}")
+        
+        # 2. Delete files from MinIO and soft-delete in DB
+        for file in files:
+            try:
+                # Delete from MinIO
+                if delete_files and file.storage_path:
+                    try:
+                        storage.delete_file(file.storage_path)
+                    except Exception as e:
+                        failed_files.append({"id": str(file.id), "error": str(e)})
+                
+                # Soft delete in database
+                file.is_deleted = 1
+                file.deleted_at = datetime.utcnow()
+                file.deleted_by = user_payload.get('sub')
+                deleted_files += 1
+            except Exception as e:
+                failed_files.append({"id": str(file.id), "error": str(e)})
+        
+        db.commit()
+        
+        logger.warning(f"All storage cleared by {user_payload.get('sub')}: {deleted_files} files deleted")
+        
+        return {
+            "success": True,
+            "message": "All storage cleared successfully",
+            "deleted_files": deleted_files,
+            "failed_count": len(failed_files),
+            "failed_files": failed_files[:10] if failed_files else [],  # Show first 10
+            "warning": "This action cannot be undone. Files have been soft-deleted."
+        }
+    except Exception as e:
+        logger.error(f"Failed to clear all storage: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to clear storage: {str(e)}")

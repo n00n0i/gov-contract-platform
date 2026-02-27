@@ -5018,6 +5018,84 @@ function StorageSettings() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
+  // Clear RAG only
+  const handleClearRagOnly = async () => {
+    if (!confirm('คุณต้องการล้างข้อมูล RAG ใช่หรือไม่?\n\nข้อมูลไฟล์ใน MinIO จะไม่ถูกลบ แต่ OCR จะถูกรีเซ็ตให้ประมวลผลใหม่ได้')) {
+      return
+    }
+    
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch('/api/v1/admin/storage/rag/clear?confirm=true', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
+
+      if (response.ok) {
+        const result = await response.json()
+        setMessage({ type: 'success', text: `ล้าง RAG สำเร็จ: ${result.deleted_chunks || 0} chunks ถูกลบ` })
+        fetchRagStats()
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        const error = await response.json()
+        setMessage({ type: 'error', text: error.detail || 'ไม่สามารถล้าง RAG ได้' })
+      }
+    } catch (err) {
+      console.error('Failed to clear RAG:', err)
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการล้าง RAG' })
+    }
+  }
+
+  // Clear All Storage (MinIO + RAG)
+  const handleClearAllStorage = async () => {
+    if (!confirm('⚠️ คำเตือน: การล้างข้อมูลทั้งหมด\n\nการกระทำนี้จะ:\n• ลบไฟล์ทั้งหมดจาก MinIO\n• ลบข้อมูล RAG ทั้งหมด\n• ไฟล์จะถูก soft-delete (สามารถกู้คืนจาก Database ได้)\n\nคุณแน่ใจหรือไม่?')) {
+      return
+    }
+    
+    // Second confirmation
+    if (!confirm('ยืนยันอีกครั้ง: ต้องการลบไฟล์ทั้งหมดจริงๆ ใช่หรือไม่?')) {
+      return
+    }
+    
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch('/api/v1/admin/storage/minio/clear?confirm=true', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
+
+      if (response.ok) {
+        const result = await response.json()
+        setMessage({ type: 'success', text: `ล้างข้อมูลสำเร็จ: ${result.deleted_files || 0} ไฟล์ถูกลบ` })
+        fetchMinioStats()
+        fetchRagStats()
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        const error = await response.json()
+        setMessage({ type: 'error', text: error.detail || 'ไม่สามารถล้างข้อมูลได้' })
+      }
+    } catch (err) {
+      console.error('Failed to clear all storage:', err)
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการล้างข้อมูล' })
+    }
+  }
+
   // File List Functions
   const fetchFileList = async (page = 1) => {
     setFileListLoading(true)
@@ -5369,6 +5447,30 @@ function StorageSettings() {
               </div>
             </div>
           </div>
+
+          {/* MinIO Danger Zone - Clear All */}
+          <div className="bg-red-50 rounded-xl shadow-sm border border-red-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <h3 className="text-lg font-semibold text-red-900">Danger Zone</h3>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-100">
+                <div>
+                  <p className="font-medium text-red-900">ล้างข้อมูลทั้งหมด</p>
+                  <p className="text-sm text-red-600">ลบไฟล์ทั้งหมดจาก MinIO และข้อมูล RAG (ไม่สามารถกู้คืนได้)</p>
+                </div>
+                <button
+                  onClick={handleClearAllStorage}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  ล้างข้อมูลทั้งหมด
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -5569,7 +5671,31 @@ function StorageSettings() {
             </div>
           </div>
 
-          {/* RAG Tips */}
+          {/* RAG Danger Zone - Clear RAG Only */}
+          <div className="bg-red-50 rounded-xl shadow-sm border border-red-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <h3 className="text-lg font-semibold text-red-900">Danger Zone - RAG Only</h3>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-100">
+                <div>
+                  <p className="font-medium text-red-900">ล้างข้อมูล RAG เท่านั้น</p>
+                  <p className="text-sm text-red-600">ลบ embeddings และ chunks ทั้งหมด แต่เก็บไฟล์ใน MinIO ไว้ (สำหรับ Resync)</p>
+                </div>
+                <button
+                  onClick={handleClearRagOnly}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  ล้าง RAG
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* RAG Tips -->
           <div className="bg-purple-50 rounded-xl border border-purple-200 p-6">
             <h3 className="text-sm font-semibold text-purple-800 mb-2 flex items-center gap-2">
               <Info className="w-4 h-4" />
