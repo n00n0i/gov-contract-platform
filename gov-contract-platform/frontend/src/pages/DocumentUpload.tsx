@@ -550,6 +550,12 @@ export default function DocumentUpload() {
                   documentType={selectedDocType}
                   contractId={selectedContract?.id}
                   onUploadComplete={handleUploadComplete}
+                  onRemove={() => {
+                    // Go back to step 1 when file is removed
+                    setStep('select-contract')
+                    setSelectedDocType('')
+                    setShowContractSelector(true)
+                  }}
                 />
               </div>
             </div>

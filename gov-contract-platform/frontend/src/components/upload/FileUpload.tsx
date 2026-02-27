@@ -16,6 +16,7 @@ interface UploadFile {
 
 interface FileUploadProps {
   onUploadComplete?: (documentId: string, extractedData?: any) => void
+  onRemove?: () => void
   documentType?: string
   contractId?: string
   vendorId?: string
@@ -43,7 +44,7 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-export function FileUpload({ onUploadComplete, documentType = 'other', contractId, vendorId }: FileUploadProps) {
+export function FileUpload({ onUploadComplete, onRemove, documentType = 'other', contractId, vendorId }: FileUploadProps) {
   const [files, setFiles] = useState<UploadFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [showExtractedData, setShowExtractedData] = useState<string | null>(null)
@@ -203,6 +204,10 @@ export function FileUpload({ onUploadComplete, documentType = 'other', contractI
 
   const removeFile = (id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id))
+    // Call onRemove callback to go back to step 1
+    if (onRemove) {
+      onRemove()
+    }
   }
 
   const handleDragOver = (e: React.DragEvent) => {
