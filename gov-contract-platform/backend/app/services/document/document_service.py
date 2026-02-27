@@ -280,8 +280,6 @@ class DocumentService:
             if result.success:
                 # Update document with OCR results
                 document.extracted_text = result.text
-                document.page_count = result.pages
-                document.language = result.language
                 document.ocr_confidence = result.confidence
                 document.ocr_status = "completed"
                 document.status = DocumentStatus.OCR_COMPLETED.value
