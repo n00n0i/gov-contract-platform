@@ -103,13 +103,37 @@ class MinIOService:
         
         Default expires: 7 days (604800 seconds) - same as JWT token
         Max allowed by MinIO: 7 days
+        
+        Uses MINIO_PUBLIC_URL for browser-accessible links.
         """
+        from app.core.config import settings
+        
         try:
+            # Generate presigned URL
             url = self.client.presigned_get_object(
                 bucket_name=self.bucket,
                 object_name=object_name,
                 expires=timedelta(seconds=expires)
             )
+            
+            # Replace internal endpoint with public URL if configured
+            if settings.MINIO_PUBLIC_URL and settings.MINIO_PUBLIC_URL != settings.MINIO_ENDPOINT:
+                # Parse the generated URL and replace the host
+                from urllib.parse import urlparse, urlunparse
+                parsed = urlparse(url)
+                public_parsed = urlparse(settings.MINIO_PUBLIC_URL)
+                
+                # Build new URL with public host/port
+                new_url = urlunparse((
+                    public_parsed.scheme or parsed.scheme,
+                    public_parsed.netloc or parsed.netloc,
+                    parsed.path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment
+                ))
+                return new_url
+            
             return url
         except S3Error as e:
             logger.error(f"Error generating presigned URL: {e}")

@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     STORAGE_TYPE: str = "minio"  # minio, s3, local
     STORAGE_BUCKET: str = "govplatform"
     MINIO_ENDPOINT: str = "localhost:9000"
+    MINIO_PUBLIC_URL: str = "http://localhost:9000"  # Public URL for presigned links (browser accessible)
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_SECURE: bool = False
