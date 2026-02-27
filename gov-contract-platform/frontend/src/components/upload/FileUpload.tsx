@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Upload, File, X, Loader2, CheckCircle, AlertCircle, FileText, Image, FileSpreadsheet, Edit2, Save } from 'lucide-react'
+import { Upload, File, X, Loader2, CheckCircle, AlertCircle, FileText, Image, FileSpreadsheet, Edit2, Save, Eye, ExternalLink } from 'lucide-react'
 import axios from 'axios'
 
 interface ExtractedDocumentData {
@@ -21,6 +21,7 @@ interface UploadFile {
   progress: number
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error'
   documentId?: string
+  documentUrl?: string
   extractedData?: ExtractedDocumentData
   editedData?: ExtractedDocumentData
   error?: string
@@ -144,7 +145,12 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
       setFiles((prev) =>
         prev.map((f) =>
           f.id === uploadFile.id
-            ? { ...f, status: 'processing', documentId: response.data.id }
+            ? { 
+                ...f, 
+                status: 'processing', 
+                documentId: response.data.id,
+                documentUrl: response.data.download_url
+              }
             : f
         )
       )
@@ -286,6 +292,35 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
     }
   }
 
+  const handleViewDocument = async (file: UploadFile) => {
+    if (!file.documentId) return
+    
+    // If we already have the URL, open it directly
+    if (file.documentUrl) {
+      window.open(file.documentUrl, '_blank')
+      return
+    }
+    
+    // Otherwise fetch the download URL
+    try {
+      const response = await api.get(`/documents/${file.documentId}/download`)
+      const downloadUrl = response.data.download_url
+      
+      // Store URL for future use
+      setFiles(prev => prev.map(f => 
+        f.id === file.id 
+          ? { ...f, documentUrl: downloadUrl }
+          : f
+      ))
+      
+      // Open in new tab
+      window.open(downloadUrl, '_blank')
+    } catch (error) {
+      console.error('Failed to get document URL:', error)
+      alert('ไม่สามารถเปิดเอกสารได้')
+    }
+  }
+
   const handleCancelEdit = () => {
     setEditingFileId(null)
     setEditFormData({})
@@ -384,6 +419,16 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {file.status === 'completed' && file.documentId && (
+                    <button
+                      onClick={() => handleViewDocument(file)}
+                      className="flex items-center gap-1 px-3 py-1 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                      title="ดูเอกสารต้นฉบับ"
+                    >
+                      <Eye className="w-4 h-4" />
+                      ดูเอกสาร
+                    </button>
+                  )}
                   {file.extractedData && (
                     <button
                       onClick={() => setShowExtractedData(

@@ -82,6 +82,15 @@ async def upload_document(
             document_data=document_data
         )
         
+        # Generate download URL
+        if document.storage_path:
+            from app.services.storage.minio_service import get_storage_service
+            storage = get_storage_service()
+            document.download_url = storage.get_presigned_url(
+                document.storage_path,
+                expires=604800  # 7 days
+            )
+        
         # Trigger agent workflows
         try:
             await on_document_upload(
