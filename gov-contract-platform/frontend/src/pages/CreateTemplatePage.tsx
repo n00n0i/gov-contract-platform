@@ -147,7 +147,7 @@ export default function CreateTemplatePage() {
   
   return (
     <div className="min-h-screen bg-gray-50">
-      <NavigationHeader />
+      <NavigationHeader title="สร้างเทมเพลต" />
       
       <main className="max-w-4xl mx-auto px-4 py-8">
         {/* Header */}

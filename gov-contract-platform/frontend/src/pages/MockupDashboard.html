@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gov Contract Platform - Dashboard Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            height: 100vh;
+            background: linear-gradient(180deg, #1a365d 0%, #2c5282 100%);
+            position: fixed;
+            left: 0;
+            top: 0;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            padding: 0 20px 30px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: #4299e1;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-menu {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .nav-item {
+            margin-bottom: 5px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: rgba(255,255,255,0.7);
+            text-decoration: none;
+            border-radius: 8px;
+            margin: 0 10px;
+            transition: all 0.3s;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+
+        .nav-icon {
+            width: 24px;
+            margin-right: 12px;
+            text-align: center;
+        }
+
+        /* Main Content */
+        .main-content {
+            margin-left: 260px;
+            padding: 30px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            color: #1a365d;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-avatar {
+            width: 45px;
+            height: 45px;
+            background: #4299e1;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .notifications {
+            position: relative;
+            cursor: pointer;
+        }
+
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #e53e3e;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .stat-title {
+            font-size: 14px;
+            color: #718096;
+            margin-bottom: 10px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #1a365d;
+            margin-bottom: 5px;
+        }
+
+        .stat-change {
+            font-size: 14px;
+            color: #48bb78;
+        }
+
+        .stat-change.negative {
+            color: #e53e3e;
+        }
+
+        /* Charts Section */
+        .charts-section {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .chart-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a365d;
+            margin-bottom: 20px;
+        }
+
+        .chart-placeholder {
+            height: 250px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        /* Recent Contracts */
+        .recent-contracts {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a365d;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #4299e1;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #3182ce;
+        }
+
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #e53e3e;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ecc94b;
+            color: #744210;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table th {
+            text-align: left;
+            padding: 12px 15px;
+            background: #f7fafc;
+            font-weight: 600;
+            color: #4a5568;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .table tr:hover {
+            background: #f7fafc;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-active {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .status-expiring {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+
+        .status-pending {
+            background: #feebc8;
+            color: #744210;
+        }
+
+        .contract-id {
+            color: #4299e1;
+            font-weight: 500;
+        }
+
+        /* Quick Actions */
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .action-card {
+            background: #f7fafc;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+
+        .action-card:hover {
+            border-color: #4299e1;
+            background: #ebf8ff;
+        }
+
+        .action-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+            color: #4299e1;
+        }
+
+        .action-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #4a5568;
+        }
+
+        /* AI Insights */
+        .ai-insights {
+            margin-top: 30px;
+        }
+
+        .ai-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 25px;
+            border-radius: 12px;
+            color: white;
+        }
+
+        .ai-card h3 {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .ai-icon {
+            font-size: 24px;
+        }
+
+        .ai-content {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .charts-section {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 70px;
+            }
+            .sidebar-header, .nav-link span {
+                display: none;
+            }
+            .nav-link {
+                justify-content: center;
+            }
+            .nav-icon {
+                margin-right: 0;
+            }
+            .main-content {
+                margin-left: 70px;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">📄</div>
+                <span>ContractMGMT</span>
+            </div>
+        </div>
+        <ul class="nav-menu">
+            <li class="nav-item">
+                <a href="#" class="nav-link active">
+                    <span class="nav-icon">📊</span>
+                    <span>Dashboard</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📋</span>
+                    <span>สัญญาทั้งหมด</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🏢</span>
+                    <span>ผู้รับจ้าง</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📄</span>
+                    <span>เทมเพลต</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🤖</span>
+                    <span>AI Agents</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🔍</span>
+                    <span>Knowledge Base</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🔔</span>
+                    <span>การแจ้งเตือน</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📊</span>
+                    <span>รายงาน</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">⚙️</span>
+                    <span>การตั้งค่า</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="header">
+            <div>
+                <h1>Dashboard</h1>
+                <p style="color: #718096;">วันที่: 28 กุมภาพันธ์ 2026</p>
+            </div>
+            <div class="user-info">
+                <div class="notifications">
+                    🔔
+                    <div class="notification-badge">3</div>
+                </div>
+                <div class="user-avatar">JD</div>
+                <div>
+                    <div style="font-weight: 600;">John Doe</div>
+                    <div style="font-size: 14px; color: #718096;">Admin</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-title">สัญญาทั้งหมด</div>
+                <div class="stat-value">1,247</div>
+                <div class="stat-change">↑ 12% จากเดือนที่แล้ว</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">สัญญาที่กำลังดำเนินการ</div>
+                <div class="stat-value">892</div>
+                <div class="stat-change">↑ 5% จากเดือนที่แล้ว</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">สัญญาใกล้หมดอายุ</div>
+                <div class="stat-value" style="color: #e53e3e;">47</div>
+                <div class="stat-change negative">⚠️ ต้องดำเนินการ</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">มูลค่าสัญญาทั้งหมด</div>
+                <div class="stat-value">2.45B</div>
+                <div class="stat-change">↑ 8% จากเดือนที่แล้ว</div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-section">
+            <div class="chart-card">
+                <div class="chart-title">มูลค่าสัญญาตามประเภท</div>
+                <div class="chart-placeholder">
+                    <div>Chart Placeholder</div>
+                </div>
+            </div>
+            <div class="chart-card">
+                <div class="chart-title">สถานะสัญญา</div>
+                <div class="chart-placeholder" style="background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);">
+                    <div>Status Chart</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="quick-actions">
+            <div class="action-card">
+                <div class="action-icon">➕</div>
+                <div class="action-label">สร้างสัญญาใหม่</div>
+            </div>
+            <div class="action-card">
+                <div class="action-icon">📤</div>
+                <div class="action-label">อัปโหลดเอกสาร</div>
+            </div>
+            <div class="action-card">
+                <div class="action-icon">🤖</div>
+                <div class="action-label">ใช้ AI วิเคราะห์</div>
+            </div>
+            <div class="action-card">
+                <div class="action-icon">📋</div>
+                <div class="action-label">รายงานสรุป</div>
+            </div>
+        </div>
+
+        <!-- Recent Contracts -->
+        <div class="recent-contracts">
+            <div class="section-header">
+                <div class="section-title">สัญญาที่เพิ่งอัปเดต</div>
+                <button class="btn btn-primary">ดูทั้งหมด</button>
+            </div>
+            <div class="table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>เลขที่สัญญา</th>
+                            <th>ชื่อสัญญา</th>
+                            <th>คู่สัญญา</th>
+                            <th>มูลค่า</th>
+                            <th>วันที่ลงนาม</th>
+                            <th>หมดอายุ</th>
+                            <th>สถานะ</th>
+                            <th>การกระทำ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="contract-id">CON-2026-001</span></td>
+                            <td>จัดซื้อคอมพิวเตอร์และอุปกรณ์</td>
+                            <td>บริษัท ไอที จำกัด</td>
+                            <td>1,250,000 บาท</td>
+                            <td>15 ก.พ. 2026</td>
+                            <td>14 ก.พ. 2027</td>
+                            <td><span class="status-badge status-active">กำลังดำเนินการ</span></td>
+                            <td>
+                                <button class="btn btn-primary">ดู</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><span class="contract-id">CON-2026-002</span></td>
+                            <td>ซ่อมบำรุงระบบเครือข่าย</td>
+                            <td>บริษัท คอมมิค จำกัด</td>
+                            <td>850,000 บาท</td>
+                            <td>10 ก.พ. 2026</td>
+                            <td>10 ก.พ. 2026</td>
+                            <td><span class="status-badge status-expiring">ใกล้หมดอายุ</span></td>
+                            <td>
+                                <button class="btn btn-primary">ดู</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><span class="contract-id">CON-2026-003</span></td>
+                            <td>พัฒนาระบบจัดการสัญญา</td>
+                            <td>บริษัท ซอฟต์แวร์ จำกัด</td>
+                            <td>2,100,000 บาท</td>
+                            <td>5 ก.พ. 2026</td>
+                            <td>5 ก.พ. 2027</td>
+                            <td><span class="status-badge status-active">กำลังดำเนินการ</span></td>
+                            <td>
+                                <button class="btn btn-primary">ดู</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><span class="contract-id">CON-2026-004</span></td>
+                            <td>จัดทำรายงานประจำปี</td>
+                            <td>บริษัท พริ้นติ้ง จำกัด</td>
+                            <td>320,000 บาท</td>
+                            <td>20 ก.พ. 2026</td>
+                            <td>20 ก.พ. 2026</td>
+                            <td><span class="status-badge status-pending">รอดำเนินการ</span></td>
+                            <td>
+                                <button class="btn btn-primary">ดู</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><span class="contract-id">CON-2026-005</span></td>
+                            <td>จัดหาบริการคลาวด์</td>
+                            <td>บริษัท คลาวด์ จำกัด</td>
+                            <td>980,000 บาท</td>
+                            <td>12 ก.พ. 2026</td>
+                            <td>12 ก.พ. 2027</td>
+                            <td><span class="status-badge status-active">กำลังดำเนินการ</span></td>
+                            <td>
+                                <button class="btn btn-primary">ดู</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- AI Insights -->
+        <div class="ai-insights">
+            <div class="ai-card">
+                <h3>
+                    <span class="ai-icon">🤖</span>
+                    AI Insights
+                </h3>
+                <div class="ai-content">
+                    <p><strong>💡 ข้อเสนอแนะ:</strong> มีสัญญา 47 ฉบับที่จะหมดอายุภายใน 30 วัน ระบบแนะนำให้ดำเนินการต่อสัญญาหรือจัดทำเอกสารใหม่</p>
+                    <p><strong>📊 สถิติ:</strong> สัญญาที่มีการชำระเงินล่าช้า: 12 ฉบับ (รวม 45 วันเฉลี่ย)</p>
+                    <p><strong>⚠️ ความเสี่ยง:</strong> 3 คู่สัญญามีความเสี่ยงสูง ควรตรวจสอบประวัติการปฏิบัติตามสัญญา</p>
+                </div>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

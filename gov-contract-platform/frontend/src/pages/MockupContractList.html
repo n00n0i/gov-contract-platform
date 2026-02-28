@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gov Contract Platform - Contract List Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            height: 100vh;
+            background: linear-gradient(180deg, #1a365d 0%, #2c5282 100%);
+            position: fixed;
+            left: 0;
+            top: 0;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            padding: 0 20px 30px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: #4299e1;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-menu {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .nav-item {
+            margin-bottom: 5px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            border-radius: 8px;
+            margin: 0 10px;
+            transition: all 0.3s;
+        }
+
+        .nav-link:hover,
+        .nav-link.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .nav-icon {
+            width: 24px;
+            margin-right: 12px;
+            text-align: center;
+        }
+
+        /* Main Content */
+        .main-content {
+            margin-left: 260px;
+            padding: 30px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            color: #1a365d;
+        }
+
+        /* Filters Section */
+        .filters-section {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            margin-bottom: 20px;
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+
+        .filter-group {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .filter-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 8px;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: #4299e1;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+        }
+
+        .filter-actions {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #4299e1;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #3182ce;
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+
+        .btn-secondary:hover {
+            background: #cbd5e0;
+        }
+
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #e53e3e;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ecc94b;
+            color: #744210;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* Contract List */
+        .contract-list {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+        }
+
+        .list-header {
+            padding: 15px 20px;
+            background: #f7fafc;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .list-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a365d;
+        }
+
+        .list-stats {
+            font-size: 14px;
+            color: #718096;
+        }
+
+        .contract-item {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+            transition: all 0.3s;
+        }
+
+        .contract-item:hover {
+            background: #f7fafc;
+        }
+
+        .contract-item:last-child {
+            border-bottom: none;
+        }
+
+        .contract-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .contract-id {
+            font-size: 14px;
+            color: #718096;
+            font-weight: 500;
+        }
+
+        .contract-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a365d;
+            margin-bottom: 8px;
+        }
+
+        .contract-vendor {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #4a5568;
+        }
+
+        .vendor-icon {
+            width: 30px;
+            height: 30px;
+            background: #edf2f7;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #718096;
+        }
+
+        .contract-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+            margin-bottom: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .detail-label {
+            font-size: 12px;
+            color: #718096;
+            margin-bottom: 4px;
+        }
+
+        .detail-value {
+            font-size: 14px;
+            font-weight: 500;
+            color: #2d3748;
+        }
+
+        .contract-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-active {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .status-expiring {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+
+        .status-pending {
+            background: #feebc8;
+            color: #744210;
+        }
+
+        .status-completed {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+
+        .status-cancelled {
+            background: #cbd5e0;
+            color: #2d3748;
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: #f7fafc;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .pagination-info {
+            font-size: 14px;
+            color: #718096;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 5px;
+        }
+
+        .page-btn {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #e2e8f0;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: #f7fafc;
+            border-color: #4299e1;
+        }
+
+        .page-btn.active {
+            background: #4299e1;
+            color: white;
+            border-color: #4299e1;
+        }
+
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* AI Button */
+        .ai-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .ai-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 70px;
+            }
+
+            .sidebar-header,
+            .nav-link span {
+                display: none;
+            }
+
+            .nav-link {
+                justify-content: center;
+            }
+
+            .nav-icon {
+                margin-right: 0;
+            }
+
+            .main-content {
+                margin-left: 70px;
+                padding: 20px;
+            }
+
+            .filter-row {
+                flex-direction: column;
+            }
+
+            .contract-details {
+                grid-template-columns: 1fr;
+            }
+
+            .contract-actions {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">📄</div>
+                <span>ContractMGMT</span>
+            </div>
+        </div>
+        <ul class="nav-menu">
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📊</span>
+                    <span>Dashboard</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link active">
+                    <span class="nav-icon">📋</span>
+                    <span>สัญญาทั้งหมด</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🏢</span>
+                    <span>ผู้รับจ้าง</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📄</span>
+                    <span>เทมเพลต</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🤖</span>
+                    <span>AI Agents</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🔍</span>
+                    <span>Knowledge Base</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🔔</span>
+                    <span>การแจ้งเตือน</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📊</span>
+                    <span>รายงาน</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">⚙️</span>
+                    <span>การตั้งค่า</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="header">
+            <div>
+                <h1>สัญญาทั้งหมด</h1>
+                <p style="color: #718096;">จัดการและติดตามสัญญาทั้งหมดของหน่วยงาน</p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-secondary">📥 นำเข้า</button>
+                <button class="btn btn-success">➕ สร้างสัญญาใหม่</button>
+            </div>
+        </header>
+
+        <!-- Filters -->
+        <div class="filters-section">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>ค้นหา</label>
+                    <input type="text" placeholder="ค้นหาจากเลขที่สัญญา, ชื่อสัญญา, ผู้รับจ้าง...">
+                </div>
+                <div class="filter-group">
+                    <label>สถานะ</label>
+                    <select>
+                        <option value="">ทั้งหมด</option>
+                        <option value="active">กำลังดำเนินการ</option>
+                        <option value="expiring">ใกล้หมดอายุ</option>
+                        <option value="pending">รอดำเนินการ</option>
+                        <option value="completed">เสร็จสิ้น</option>
+                        <option value="cancelled">ยกเลิก</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>ประเภท</label>
+                    <select>
+                        <option value="">ทั้งหมด</option>
+                        <option value="procurement">จัดซื้อ</option>
+                        <option value="service">บริการ</option>
+                        <option value="construction">ก่อสร้าง</option>
+                        <option value="consulting">ที่ปรึกษา</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>ช่วงวันที่</label>
+                    <input type="text" placeholder="เลือกช่วงวันที่...">
+                </div>
+            </div>
+            <div class="filter-actions">
+                <button class="btn btn-primary">🔍 ค้นหา</button>
+                <button class="btn btn-secondary">🗑️ ล้างตัวกรอง</button>
+                <button class="btn btn-secondary">💾 บันทึกตัวกรอง</button>
+            </div>
+        </div>
+
+        <!-- Contract List -->
+        <div class="contract-list">
+            <div class="list-header">
+                <div class="list-title">สัญญาทั้งหมด</div>
+                <div class="list-stats">แสดง 1-5 จาก 1,247 รายการ</div>
+            </div>
+
+            <!-- Contract Item 1 -->
+            <div class="contract-item">
+                <div class="contract-header">
+                    <div>
+                        <div class="contract-id">เลขที่: CON-2026-001</div>
+                        <div class="contract-title">จัดซื้อคอมพิวเตอร์และอุปกรณ์ไอที ประจำปี 2569</div>
+                        <div class="contract-vendor">
+                            <div class="vendor-icon">🏢</div>
+                            <span>บริษัท ไอที จำกัด</span>
+                        </div>
+                    </div>
+                    <div class="contract-actions">
+                        <button class="ai-btn">
+                            <span>🤖</span>
+                            <span>AI วิเคราะห์</span>
+                        </button>
+                        <button class="btn btn-primary">ดู</button>
+                        <button class="btn btn-secondary">แก้ไข</button>
+                    </div>
+                </div>
+                <div class="contract-details">
+                    <div class="detail-item">
+                        <span class="detail-label">มูลค่าสัญญา</span>
+                        <span class="detail-value">1,250,000 บาท</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่ลงนาม</span>
+                        <span class="detail-value">15 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่เริ่มต้น</span>
+                        <span class="detail-value">15 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่สิ้นสุด</span>
+                        <span class="detail-value">14 ก.พ. 2570</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">สถานะ</span>
+                        <span class="status-badge status-active">กำลังดำเนินการ</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contract Item 2 -->
+            <div class="contract-item">
+                <div class="contract-header">
+                    <div>
+                        <div class="contract-id">เลขที่: CON-2026-002</div>
+                        <div class="contract-title">ซ่อมบำรุงระบบเครือข่ายและอินเทอร์เน็ต</div>
+                        <div class="contract-vendor">
+                            <div class="vendor-icon">🏢</div>
+                            <span>บริษัท คอมมิค จำกัด</span>
+                        </div>
+                    </div>
+                    <div class="contract-actions">
+                        <button class="ai-btn">
+                            <span>🤖</span>
+                            <span>AI วิเคราะห์</span>
+                        </button>
+                        <button class="btn btn-primary">ดู</button>
+                        <button class="btn btn-secondary">แก้ไข</button>
+                    </div>
+                </div>
+                <div class="contract-details">
+                    <div class="detail-item">
+                        <span class="detail-label">มูลค่าสัญญา</span>
+                        <span class="detail-value">850,000 บาท</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่ลงนาม</span>
+                        <span class="detail-value">10 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่เริ่มต้น</span>
+                        <span class="detail-value">10 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่สิ้นสุด</span>
+                        <span class="detail-value" style="color: #e53e3e;">10 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">สถานะ</span>
+                        <span class="status-badge status-expiring">ใกล้หมดอายุ</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contract Item 3 -->
+            <div class="contract-item">
+                <div class="contract-header">
+                    <div>
+                        <div class="contract-id">เลขที่: CON-2026-003</div>
+                        <div class="contract-title">พัฒนาระบบจัดการสัญญาและเอกสารอิเล็กทรอนิกส์</div>
+                        <div class="contract-vendor">
+                            <div class="vendor-icon">🏢</div>
+                            <span>บริษัท ซอฟต์แวร์ จำกัด</span>
+                        </div>
+                    </div>
+                    <div class="contract-actions">
+                        <button class="ai-btn">
+                            <span>🤖</span>
+                            <span>AI วิเคราะห์</span>
+                        </button>
+                        <button class="btn btn-primary">ดู</button>
+                        <button class="btn btn-secondary">แก้ไข</button>
+                    </div>
+                </div>
+                <div class="contract-details">
+                    <div class="detail-item">
+                        <span class="detail-label">มูลค่าสัญญา</span>
+                        <span class="detail-value">2,100,000 บาท</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่ลงนาม</span>
+                        <span class="detail-value">5 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่เริ่มต้น</span>
+                        <span class="detail-value">5 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่สิ้นสุด</span>
+                        <span class="detail-value">5 ก.พ. 2570</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">สถานะ</span>
+                        <span class="status-badge status-active">กำลังดำเนินการ</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contract Item 4 -->
+            <div class="contract-item">
+                <div class="contract-header">
+                    <div>
+                        <div class="contract-id">เลขที่: CON-2026-004</div>
+                        <div class="contract-title">จัดทำรายงานประจำปีและสิ่งพิมพ์ต่างๆ</div>
+                        <div class="contract-vendor">
+                            <div class="vendor-icon">🏢</div>
+                            <span>บริษัท พริ้นติ้ง จำกัด</span>
+                        </div>
+                    </div>
+                    <div class="contract-actions">
+                        <button class="ai-btn">
+                            <span>🤖</span>
+                            <span>AI วิเคราะห์</span>
+                        </button>
+                        <button class="btn btn-primary">ดู</button>
+                        <button class="btn btn-secondary">แก้ไข</button>
+                    </div>
+                </div>
+                <div class="contract-details">
+                    <div class="detail-item">
+                        <span class="detail-label">มูลค่าสัญญา</span>
+                        <span class="detail-value">320,000 บาท</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่ลงนาม</span>
+                        <span class="detail-value">20 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่เริ่มต้น</span>
+                        <span class="detail-value">20 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่สิ้นสุด</span>
+                        <span class="detail-value" style="color: #e53e3e;">20 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">สถานะ</span>
+                        <span class="status-badge status-pending">รอดำเนินการ</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contract Item 5 -->
+            <div class="contract-item">
+                <div class="contract-header">
+                    <div>
+                        <div class="contract-id">เลขที่: CON-2026-005</div>
+                        <div class="contract-title">จัดหาบริการคลาวด์และระบบสำรองข้อมูล</div>
+                        <div class="contract-vendor">
+                            <div class="vendor-icon">🏢</div>
+                            <span>บริษัท คลาวด์ จำกัด</span>
+                        </div>
+                    </div>
+                    <div class="contract-actions">
+                        <button class="ai-btn">
+                            <span>🤖</span>
+                            <span>AI วิเคราะห์</span>
+                        </button>
+                        <button class="btn btn-primary">ดู</button>
+                        <button class="btn btn-secondary">แก้ไข</button>
+                    </div>
+                </div>
+                <div class="contract-details">
+                    <div class="detail-item">
+                        <span class="detail-label">มูลค่าสัญญา</span>
+                        <span class="detail-value">980,000 บาท</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่ลงนาม</span>
+                        <span class="detail-value">12 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่เริ่มต้น</span>
+                        <span class="detail-value">12 ก.พ. 2569</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">วันที่สิ้นสุด</span>
+                        <span class="detail-value">12 ก.พ. 2570</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">สถานะ</span>
+                        <span class="status-badge status-active">กำลังดำเนินการ</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination">
+                <div class="pagination-info">แสดง 1-5 จาก 1,247 รายการ</div>
+                <div class="pagination-controls">
+                    <button class="page-btn" disabled>
+                        << /button>
+                            <button class="page-btn active">1</button>
+                            <button class="page-btn">2</button>
+                            <button class="page-btn">3</button>
+                            <button class="page-btn">...</button>
+                            <button class="page-btn">250</button>
+                            <button class="page-btn">></button>
+                </div>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>

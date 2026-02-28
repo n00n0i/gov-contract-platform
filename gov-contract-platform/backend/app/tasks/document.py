@@ -10,6 +10,10 @@ from app.db.database import SessionLocal
 from app.services.document.document_service import DocumentService
 from app.services.document.ocr_service import get_ocr_service
 from app.services.storage.minio_service import get_storage_service
+from app.services.graph import get_contracts_graph_service
+from app.models.graph_models import GraphEntity, GraphRelationship, GraphDocument, EntityType, RelationType, GraphDomain, SecurityLevel
+import uuid
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +35,12 @@ def process_document_ocr(self, document_id: str, tenant_id: str = None) -> Dict[
         # Process OCR
         result = doc_service.process_ocr(document_id)
         
+        # Always queue GraphRAG - even if OCR failed, we create a document entity
+        logger.info(f"[OCR Task] Queueing GraphRAG extraction for document {document_id}")
+        process_graphrag_extraction.delay(document_id, tenant_id)
+
         if result.success:
             logger.info(f"[OCR Task] Completed for document {document_id}")
-            
-            # Queue GraphRAG extraction after OCR completes
-            logger.info(f"[OCR Task] Queueing GraphRAG extraction for document {document_id}")
-            process_graphrag_extraction.delay(document_id, tenant_id)
-            
             return {
                 "status": "success",
                 "document_id": document_id,
@@ -47,11 +50,11 @@ def process_document_ocr(self, document_id: str, tenant_id: str = None) -> Dict[
             }
         else:
             logger.error(f"[OCR Task] Failed for document {document_id}: {result.error}")
-            # Don't retry on OCR failure, it's usually a content issue
             return {
                 "status": "failed",
                 "document_id": document_id,
-                "error": result.error
+                "error": result.error,
+                "graphrag_queued": True
             }
             
     except Exception as exc:
@@ -137,11 +140,14 @@ def process_graphrag_extraction(self, document_id: str, tenant_id: str = None) -
             ContractAttachment.id == document_id
         ).first()
         
-        if not document or not document.extracted_text:
+        if not document:
             return {
                 "status": "skipped",
-                "reason": "No OCR text available for GraphRAG"
+                "reason": "Document not found"
             }
+
+        if not document.extracted_text:
+            logger.warning(f"[GraphRAG Task] No OCR text for {document_id} - will still create document entity")
         
         # Get MinIO file info for linking
         storage = get_storage_service()
@@ -164,37 +170,150 @@ def process_graphrag_extraction(self, document_id: str, tenant_id: str = None) -
         
         entities = []
         relationships = []
+
+        # --- Document entity (always created) ---
+        doc_entity_id = f"DOC_ENTITY_{document_id}"
+        entities.append({
+            "id": doc_entity_id,
+            "type": EntityType.DOCUMENT.value,
+            "name": document.original_filename or document_id,
+            "properties": {
+                "document_type": document.document_type or "contract",
+                "storage_path": minio_path,
+                "ocr_confidence": float(document.ocr_confidence) if document.ocr_confidence else None,
+            },
+            "source": "system",
+            "confidence": 1.0
+        })
+
+        # Track entity IDs for cross-referencing in relationships
+        contract_num_entity_id = None
         
-        # Example entity extraction (to be implemented with LLM)
+        def get_entity_id(entity_type: str, name: str) -> str:
+            """Generate deterministic entity ID based on name to avoid duplicates"""
+            # Normalize name: lowercase, strip spaces
+            normalized = f"{entity_type}:{name}".lower().strip()
+            # Create hash for ID
+            return hashlib.md5(normalized.encode('utf-8')).hexdigest()
+
+        # Contract number
         if document.extracted_contract_number:
+            contract_num = document.extracted_contract_number
+            contract_num_entity_id = get_entity_id("contract_number", contract_num)
             entities.append({
-                "type": "CONTRACT_NUMBER",
-                "value": document.extracted_contract_number,
+                "id": contract_num_entity_id,
+                "type": EntityType.CONTRACT_NUMBER.value,
+                "name": document.extracted_contract_number,
                 "source": "ocr"
             })
-        
+            relationships.append({
+                "source_id": doc_entity_id,
+                "target_id": contract_num_entity_id,
+                "type": RelationType.MENTIONS.value
+            })
+
+        # Contract value
         if document.extracted_contract_value:
+            value_str = str(document.extracted_contract_value)
+            value_entity_id = get_entity_id("money", value_str)
             entities.append({
-                "type": "MONETARY_VALUE",
-                "value": str(document.extracted_contract_value),
-                "currency": "THB",
+                "id": value_entity_id,
+                "type": EntityType.MONEY.value,
+                "name": value_str,
+                "properties": {"currency": "THB"},
                 "source": "ocr"
             })
-        
-        # Store parties as entities
+            relationships.append({
+                "source_id": doc_entity_id,
+                "target_id": value_entity_id,
+                "type": RelationType.HAS_VALUE.value
+            })
+
+        # Start date
+        start_date_val = (document.extracted_start_date or
+                          (document.extracted_data.get("start_date") if document.extracted_data else None))
+        if start_date_val:
+            sd_str = str(start_date_val)
+            sd_entity_id = get_entity_id("start_date", sd_str)
+            entities.append({
+                "id": sd_entity_id,
+                "type": EntityType.START_DATE.value,
+                "name": sd_str,
+                "properties": {"date_type": "start"},
+                "source": "ocr"
+            })
+            relationships.append({
+                "source_id": doc_entity_id,
+                "target_id": sd_entity_id,
+                "type": RelationType.HAS_START_DATE.value
+            })
+
+        # End date
+        end_date_val = (document.extracted_end_date or
+                        (document.extracted_data.get("end_date") if document.extracted_data else None))
+        if end_date_val:
+            ed_str = str(end_date_val)
+            ed_entity_id = get_entity_id("end_date", ed_str)
+            entities.append({
+                "id": ed_entity_id,
+                "type": EntityType.END_DATE.value,
+                "name": ed_str,
+                "properties": {"date_type": "end"},
+                "source": "ocr"
+            })
+            relationships.append({
+                "source_id": doc_entity_id,
+                "target_id": ed_entity_id,
+                "type": RelationType.HAS_END_DATE.value
+            })
+
+        # Project name
+        project_name = document.extracted_data.get("project_name") if document.extracted_data else None
+        if project_name:
+            proj_entity_id = get_entity_id("project", project_name)
+            entities.append({
+                "id": proj_entity_id,
+                "type": EntityType.PROJECT.value,
+                "name": project_name,
+                "source": "ocr"
+            })
+            relationships.append({
+                "source_id": doc_entity_id,
+                "target_id": proj_entity_id,
+                "type": RelationType.MENTIONS.value
+            })
+
+        # Parties
         if document.extracted_parties:
             for party in document.extracted_parties:
+                party_name = party.get("name", "Unknown")
+                if not party_name or party_name == "Unknown":
+                    continue
+                party_type = party.get("type", "")
+                if party_type in ("company", "government"):
+                    etype = EntityType.ORGANIZATION.value
+                else:
+                    etype = EntityType.PERSON.value
+                # Use name + type for ID to avoid duplicates
+                party_entity_id = get_entity_id(etype, party_name)
                 entities.append({
-                    "type": "ORGANIZATION" if party.get("type") == "company" else "PERSON",
-                    "name": party.get("name"),
-                    "role": party.get("role", "unknown"),
+                    "id": party_entity_id,
+                    "type": etype,
+                    "name": party_name,
+                    "properties": {"role": party.get("role", party_type)},
                     "source": "ocr"
                 })
                 relationships.append({
-                    "from": party.get("name"),
-                    "to": document.extracted_contract_number or document_id,
-                    "type": "PARTY_TO"
+                    "source_id": doc_entity_id,
+                    "target_id": party_entity_id,
+                    "type": RelationType.MENTIONS.value
                 })
+                if contract_num_entity_id:
+                    relationships.append({
+                        "source_id": party_entity_id,
+                        "target_id": contract_num_entity_id,
+                        "type": RelationType.CONTRACTS_WITH.value
+                    })
         
         # Create document node with MinIO link
         document_node = {
@@ -217,8 +336,85 @@ def process_graphrag_extraction(self, document_id: str, tenant_id: str = None) -
         
         logger.info(f"[GraphRAG Task] Extracted {len(entities)} entities, {len(relationships)} relationships for document {document_id}")
         
-        # TODO: Save to Neo4j
-        # await save_to_graph(document_node, entities, relationships)
+        # Save to Neo4j using ContractsGraphService
+        try:
+            graph_service = get_contracts_graph_service()
+            
+            # Get security level from extracted_data or default to PUBLIC
+            doc_security_level = SecurityLevel.PUBLIC
+            if document.extracted_data:
+                level = document.extracted_data.get("security_level")
+                if level:
+                    try:
+                        doc_security_level = SecurityLevel(level)
+                    except ValueError:
+                        pass
+            
+            # Convert to GraphDocument
+            graph_doc = GraphDocument(
+                doc_id=document_id,
+                doc_type=document.document_type or "contract",
+                title=document.original_filename or "Untitled",
+                domain=GraphDomain.CONTRACTS,
+                tenant_id=tenant_id,
+                department_id=document.extracted_data.get("department_id") if document.extracted_data else None,
+                security_level=doc_security_level,
+                entities=[
+                    GraphEntity(
+                        id=entity.get("id", str(uuid.uuid4())),
+                        type=EntityType(entity.get("type", "document")),
+                        name=entity.get("name", "Unknown"),
+                        domain=GraphDomain.CONTRACTS,
+                        properties=entity.get("properties", {}),
+                        source_doc=document_id,
+                        confidence=entity.get("confidence", 0.7),
+                        tenant_id=tenant_id,
+                        department_id=document.extracted_data.get("department_id") if document.extracted_data else None,
+                        security_level=doc_security_level
+                    )
+                    for entity in entities
+                ],
+                relationships=[
+                    GraphRelationship(
+                        id=rel.get("id", str(uuid.uuid4())),
+                        type=RelationType(rel.get("type", RelationType.MENTIONS.value)),
+                        source_id=rel.get("source_id", ""),
+                        target_id=rel.get("target_id", ""),
+                        domain=GraphDomain.CONTRACTS,
+                        properties=rel.get("properties", {}),
+                        source_doc=document_id,
+                        confidence=rel.get("confidence", 0.7),
+                        tenant_id=tenant_id,
+                        department_id=document.extracted_data.get("department_id") if document.extracted_data else None,
+                        security_level=doc_security_level
+                    )
+                    for rel in relationships
+                ]
+            )
+            
+            # Save to graph
+            success = graph_service.save_graph_document(graph_doc)
+            if success:
+                logger.info(f"[GraphRAG Task] Saved document {document_id} to Neo4j with {len(entities)} entities")
+            else:
+                logger.error(f"[GraphRAG Task] Failed to save document {document_id} to Neo4j - marking as failed")
+                return {
+                    "status": "failed",
+                    "document_id": document_id,
+                    "error": "Failed to save to Neo4j graph",
+                    "entities_extracted": len(entities),
+                    "relationships_extracted": len(relationships)
+                }
+                
+        except Exception as graph_err:
+            logger.error(f"[GraphRAG Task] Error saving to Neo4j: {graph_err}")
+            return {
+                "status": "failed",
+                "document_id": document_id,
+                "error": str(graph_err),
+                "entities_extracted": len(entities),
+                "relationships_extracted": len(relationships)
+            }
         
         return {
             "status": "success",
@@ -228,7 +424,8 @@ def process_graphrag_extraction(self, document_id: str, tenant_id: str = None) -
             "document_node": document_node,
             "minio_path": minio_path,
             "entities": entities,
-            "relationships": relationships
+            "relationships": relationships,
+            "saved_to_graph": success if 'success' in locals() else False
         }
         
     except Exception as exc:

@@ -674,6 +674,12 @@ async def create_contract(
         
         logger.info(f"Created contract {contract.id} by {user_id}")
         
+        # Update contract stats
+        try:
+            await update_contract_stats(db, contract, user_id)
+        except Exception as e:
+            logger.error(f"Failed to update contract stats: {e}")
+        
         # Trigger AI agents
         try:
             await on_contract_created(
@@ -769,6 +775,22 @@ async def delete_contract(
         
         db.commit()
         
+        # Log activity for stats
+        try:
+            from app.models.user import UserActivity
+            activity = UserActivity(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                action="contract_deleted",
+                entity_type="contract",
+                entity_id=contract.id,
+                details={"contract_no": contract.contract_no, "title": contract.title}
+            )
+            db.add(activity)
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to log delete activity: {e}")
+        
         return {
             "success": True,
             "message": "Contract deleted successfully"
@@ -802,6 +824,26 @@ async def submit_for_approval(
         contract.updated_at = datetime.utcnow()
         
         db.commit()
+        
+        # Log activity for stats
+        try:
+            from app.models.user import UserActivity
+            activity = UserActivity(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                action="contract_submitted",
+                entity_type="contract",
+                entity_id=contract.id,
+                details={
+                    "contract_no": contract.contract_no,
+                    "title": contract.title,
+                    "status": contract.status.value
+                }
+            )
+            db.add(activity)
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to log submit activity: {e}")
         
         # Trigger approval analysis
         try:
@@ -863,6 +905,27 @@ async def approve_contract(
         
         db.commit()
         
+        # Log activity for stats
+        try:
+            from app.models.user import UserActivity
+            activity = UserActivity(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                action="contract_approved",
+                entity_type="contract",
+                entity_id=contract.id,
+                details={
+                    "contract_no": contract.contract_no,
+                    "title": contract.title,
+                    "status": contract.status.value,
+                    "approval_level": contract.current_approval_level
+                }
+            )
+            db.add(activity)
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to log approve activity: {e}")
+        
         return {
             "success": True,
             "message": "Contract approved",
@@ -884,6 +947,7 @@ async def get_contract_stats(
     user_payload: dict = Depends(get_current_user_payload)
 ):
     """Get contract statistics"""
+    from datetime import datetime, timedelta
     
     # Base query - exclude deleted
     base_query = db.query(Contract).filter(Contract.is_deleted == 0)
@@ -894,6 +958,14 @@ async def get_contract_stats(
     draft = base_query.filter(Contract.status == ContractStatus.DRAFT).count()
     completed = base_query.filter(Contract.status == ContractStatus.COMPLETED).count()
     terminated = base_query.filter(Contract.status == ContractStatus.TERMINATED).count()
+    
+    # Expiring soon (within 60 days)
+    sixty_days_later = datetime.utcnow() + timedelta(days=60)
+    expiring_soon = base_query.filter(
+        Contract.status == ContractStatus.ACTIVE,
+        Contract.end_date <= sixty_days_later,
+        Contract.end_date >= datetime.utcnow()
+    ).count()
     
     # Total value
     total_value = db.query(func.sum(Contract.value_original)).filter(
@@ -909,6 +981,7 @@ async def get_contract_stats(
             "draft": draft,
             "completed": completed,
             "terminated": terminated,
+            "expiring_soon": expiring_soon,
             "total_value": float(total_value),
             "currency": "THB"
         }
@@ -916,3 +989,31 @@ async def get_contract_stats(
 
 
 from sqlalchemy import func
+
+
+async def update_contract_stats(db: Session, contract: Contract, user_id: str):
+    """
+    Update contract statistics after contract creation.
+    This updates dashboard stats and other aggregated data.
+    """
+    from app.models.user import UserActivity
+    
+    # Log activity for stats tracking
+    activity = UserActivity(
+        id=str(uuid.uuid4()),
+        user_id=user_id,
+        action="contract_created",
+        entity_type="contract",
+        entity_id=contract.id,
+        details={
+            "contract_no": contract.contract_no,
+            "title": contract.title,
+            "value": float(contract.value_original) if contract.value_original else 0,
+            "contract_type": contract.contract_type.value if contract.contract_type else None,
+            "status": contract.status.value if contract.status else None,
+        }
+    )
+    db.add(activity)
+    db.commit()
+    
+    logger.info(f"Updated contract stats for new contract {contract.id}")

@@ -253,6 +253,76 @@ def download_document(
     }
 
 
+@router.get("/{document_id}/view")
+def view_document(
+    document_id: str,
+    doc_service: DocumentService = Depends(get_doc_service)
+):
+    """
+    Stream document content for viewing (PDF viewer)
+    
+    This endpoint proxies the file from MinIO through the backend,
+    avoiding signature mismatch issues with presigned URLs.
+    Supports PDF and other document types.
+    """
+    document = doc_service.get_document(document_id)
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+    
+    if not document.storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Document has no file"
+        )
+    
+    # Stream file from MinIO
+    from app.services.storage.minio_service import get_storage_service
+    storage = get_storage_service()
+    
+    try:
+        response = storage.get_file_stream(document.storage_path)
+        
+        # Determine content type
+        content_type = document.mime_type or "application/octet-stream"
+        
+        # Build Content-Disposition header with RFC 5987 encoding for UTF-8 filenames
+        # Use both filename (ASCII fallback) and filename* (UTF-8) for compatibility
+        from urllib.parse import quote
+        encoded_filename = quote(document.filename.encode('utf-8'), safe='')
+        # Use simple ASCII filename for the filename parameter (browsers will use filename* if available)
+        ascii_filename = document.filename.encode('ascii', 'ignore').decode() or 'document'
+        content_disposition = f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_filename}"
+        
+        # For PDF files, set inline disposition for browser viewing
+        if document.extension and document.extension.lower() == "pdf":
+            return StreamingResponse(
+                response,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": content_disposition
+                }
+            )
+        else:
+            # For other files, detect from extension
+            return StreamingResponse(
+                response,
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": content_disposition
+                }
+            )
+            
+    except Exception as e:
+        logger.error(f"Failed to stream document: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve document: {str(e)}"
+        )
+
+
 @router.patch("/{document_id}", response_model=DocumentResponse)
 def update_document(
     document_id: str,
@@ -480,18 +550,16 @@ def list_documents(
     doc_service: DocumentService = Depends(get_doc_service)
 ):
     """List documents with pagination"""
-    documents, total = doc_service.list_documents(
+    result = doc_service.list_documents(
         page=page,
         page_size=page_size,
         document_type=document_type,
-        ocr_status=ocr_status
+        status=ocr_status
     )
-    
-    pages = (total + page_size - 1) // page_size
-    
+
     return {
-        "items": documents,
-        "total": total,
-        "page": page,
-        "pages": pages
+        "items": result["items"],
+        "total": result["total"],
+        "page": result["page"],
+        "pages": result["pages"]
     }

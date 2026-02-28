@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ZoomIn, ZoomOut, Move, RefreshCw, X, Info } from 'lucide-react'
-import { getGraphVisualization, getEntityNeighborhood, type GraphNode, type GraphEdge } from '../services/graphService'
+import { ZoomIn, ZoomOut, Move, RefreshCw, X, Info, Maximize2, Minimize2 } from 'lucide-react'
+import { getGraphVisualization, type GraphNode, type GraphEdge } from '../services/graphService'
 
 interface GraphVisualizationProps {
   centerEntity?: string
@@ -21,8 +21,11 @@ export default function GraphVisualization({
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [zoom, setZoom] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
-  const [isDragging, setIsDragging] = useState(false)
+  const [isDraggingCanvas, setIsDraggingCanvas] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [draggedNode, setDraggedNode] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
 
   // Color scheme for entity types (Thai labels)
   const typeColors: Record<string, string> = {
@@ -78,7 +81,14 @@ export default function GraphVisualization({
       setNodes(positionedNodes)
       setEdges(data.edges)
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load graph data')
+      // Check if it's a 404 (no data) or other error
+      if (err.response?.status === 404) {
+        // No graph data yet - this is OK, just empty graph
+        setNodes([])
+        setEdges([])
+      } else {
+        setError(err.response?.data?.detail || 'Failed to load graph data')
+      }
     } finally {
       setLoading(false)
     }
@@ -88,15 +98,16 @@ export default function GraphVisualization({
     fetchGraphData()
   }, [centerEntity, depth])
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  // Canvas pan handlers
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (e.target === svgRef.current) {
-      setIsDragging(true)
+      setIsDraggingCanvas(true)
       setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y })
     }
   }
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging) {
+  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    if (isDraggingCanvas && !draggedNode) {
       setOffset({
         x: e.clientX - dragStart.x,
         y: e.clientY - dragStart.y
@@ -104,8 +115,48 @@ export default function GraphVisualization({
     }
   }
 
-  const handleMouseUp = () => {
-    setIsDragging(false)
+  const handleCanvasMouseUp = () => {
+    setIsDraggingCanvas(false)
+  }
+
+  // Node drag handlers
+  const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
+    e.stopPropagation()
+    const node = nodes.find(n => n.id === nodeId)
+    if (!node) return
+    
+    setDraggedNode(nodeId)
+    setDragOffset({
+      x: e.clientX,
+      y: e.clientY
+    })
+  }
+
+  const handleNodeMouseMove = (e: React.MouseEvent) => {
+    if (draggedNode) {
+      const deltaX = (e.clientX - dragOffset.x) / zoom
+      const deltaY = (e.clientY - dragOffset.y) / zoom
+      
+      setNodes(prev => prev.map(node => {
+        if (node.id === draggedNode) {
+          return {
+            ...node,
+            x: node.x + deltaX,
+            y: node.y + deltaY
+          }
+        }
+        return node
+      }))
+      
+      setDragOffset({
+        x: e.clientX,
+        y: e.clientY
+      })
+    }
+  }
+
+  const handleNodeMouseUp = () => {
+    setDraggedNode(null)
   }
 
   const handleZoomIn = () => setZoom(z => Math.min(z * 1.2, 3))
@@ -142,8 +193,26 @@ export default function GraphVisualization({
     )
   }
 
+  // Empty state - no graph data yet
+  if (nodes.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="text-center text-gray-500">
+          <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+            <Info className="w-6 h-6 text-gray-400" />
+          </div>
+          <p className="font-medium">ยังไม่มีข้อมูลกราฟ</p>
+          <p className="text-sm mt-1">กราฟจะถูกสร้างอัตโนมัติเมื่อมีการอัพโหลดเอกสารและสกัด Entity</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="relative bg-gray-50 rounded-lg border overflow-hidden">
+    <div 
+      className={`relative bg-gray-50 rounded-lg border overflow-hidden ${isFullscreen ? 'fixed inset-0 z-50' : ''}`}
+      style={{ fontFamily: '"Sarabun", "Noto Sans Thai", system-ui, sans-serif' }}
+    >
       {/* Controls */}
       <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
         <button
@@ -166,6 +235,17 @@ export default function GraphVisualization({
           title="Reset View"
         >
           <Move className="w-5 h-5 text-gray-600" />
+        </button>
+        <button
+          onClick={() => setIsFullscreen(!isFullscreen)}
+          className="p-2 bg-white rounded-lg shadow hover:bg-gray-50 transition"
+          title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+        >
+          {isFullscreen ? (
+            <Minimize2 className="w-5 h-5 text-gray-600" />
+          ) : (
+            <Maximize2 className="w-5 h-5 text-gray-600" />
+          )}
         </button>
       </div>
 
@@ -192,16 +272,32 @@ export default function GraphVisualization({
         </p>
       </div>
 
+      {/* Help text */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-white/90 rounded-lg shadow px-3 py-1.5">
+        <p className="text-xs text-gray-500">
+          🖱️ ลาก node เพื่อจัดตำแหน่ง • ลากพื้นหลังเพื่อเลื่อนกราฟ
+        </p>
+      </div>
+
       {/* SVG Graph */}
       <svg
         ref={svgRef}
         width="100%"
-        height={height}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        className={`${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        height={isFullscreen ? '100vh' : height}
+        onMouseDown={handleCanvasMouseDown}
+        onMouseMove={(e) => {
+          handleCanvasMouseMove(e)
+          handleNodeMouseMove(e)
+        }}
+        onMouseUp={() => {
+          handleCanvasMouseUp()
+          handleNodeMouseUp()
+        }}
+        onMouseLeave={() => {
+          handleCanvasMouseUp()
+          handleNodeMouseUp()
+        }}
+        className={`${isDraggingCanvas || draggedNode ? 'cursor-grabbing' : 'cursor-grab'}`}
       >
         <g transform={`translate(${offset.x}, ${offset.y}) scale(${zoom})`}>
           {/* Edges */}
@@ -230,7 +326,9 @@ export default function GraphVisualization({
               key={node.id}
               transform={`translate(${node.x}, ${node.y})`}
               onClick={() => setSelectedNode(node)}
-              className="cursor-pointer hover:opacity-80 transition"
+              onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+              className={`cursor-pointer hover:opacity-80 transition ${draggedNode === node.id ? 'cursor-grabbing' : 'cursor-grab'}`}
+              style={{ pointerEvents: 'all' }}
             >
               <circle
                 r={node.id === centerEntity ? 25 : 18}
@@ -242,10 +340,20 @@ export default function GraphVisualization({
               <text
                 textAnchor="middle"
                 dy=".3em"
-                className="text-xs fill-white font-medium pointer-events-none"
-                style={{ fontSize: node.id === centerEntity ? '10px' : '8px' }}
+                className="fill-white font-medium pointer-events-none select-none"
+                style={{ 
+                  fontSize: node.id === centerEntity ? '10px' : '8px',
+                  fontFamily: '"Sarabun", "Noto Sans Thai", system-ui, -apple-system, sans-serif',
+                  textRendering: 'geometricPrecision'
+                }}
               >
-                {node.name.length > 10 ? node.name.substring(0, 10) + '...' : node.name}
+                {(() => {
+                  // Proper Unicode truncation for Thai text
+                  const chars = Array.from(node.name)
+                  // Show up to 6 characters for better display in small circles
+                  if (chars.length <= 6) return node.name
+                  return chars.slice(0, 5).join('') + '...'
+                })()}
               </text>
             </g>
           ))}
@@ -254,7 +362,7 @@ export default function GraphVisualization({
 
       {/* Selected Node Details */}
       {selectedNode && (
-        <div className="absolute bottom-4 right-4 z-10 bg-white rounded-lg shadow-lg p-4 w-64">
+        <div className="absolute bottom-4 right-4 z-10 bg-white rounded-lg shadow-lg p-4 w-64" style={{ fontFamily: '"Sarabun", "Noto Sans Thai", system-ui, sans-serif' }}>
           <div className="flex items-center justify-between mb-2">
             <h4 className="font-medium text-gray-900">{selectedNode.name}</h4>
             <button 
@@ -268,16 +376,19 @@ export default function GraphVisualization({
             <p><span className="text-gray-400">ประเภท:</span> {typeLabels[selectedNode.type] || selectedNode.type}</p>
             <p><span className="text-gray-400">รหัส:</span> {selectedNode.id.substring(0, 8)}...</p>
           </div>
+          {/* Detail button temporarily disabled - endpoint not ready */}
+          {/*
           <button
             onClick={async () => {
-              const data = await getEntityNeighborhood(selectedNode.id, 2)
-              console.log('Neighborhood:', data)
+              // TODO: Use new endpoint /graph/contracts/entities/{id}
+              console.log('View details for:', selectedNode.id)
             }}
             className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition text-sm"
           >
             <Info className="w-4 h-4" />
             ดูรายละเอียด
           </button>
+          */}
         </div>
       )}
     </div>

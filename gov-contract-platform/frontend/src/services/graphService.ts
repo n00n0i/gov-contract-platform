@@ -54,10 +54,28 @@ export const getGraphStats = async (): Promise<GraphStats> => {
 }
 
 export const searchEntities = async (query: string, entityType?: string, limit: number = 20): Promise<GraphEntity[]> => {
-  const response = await api.get('/graph/entities/search', {
-    params: { q: query, entity_type: entityType, limit }
-  })
-  return response.data.data
+  // Use contracts graph search endpoint (with security filtering)
+  try {
+    const response = await api.get('/graph/contracts/entities/search', {
+      params: { q: query, entity_type: entityType, limit }
+    })
+    return response.data.data || []
+  } catch (error: any) {
+    // Fallback to legacy endpoint if contracts endpoint not available
+    if (error.response?.status === 404) {
+      try {
+        const response = await api.get('/graph/entities/search', {
+          params: { q: query, entity_type: entityType, limit }
+        })
+        return response.data.data || []
+      } catch (legacyError: any) {
+        console.warn('Graph entity search failed:', legacyError)
+        return []
+      }
+    }
+    console.warn('Graph entity search failed:', error)
+    return []
+  }
 }
 
 export const getEntity = async (entityId: string): Promise<GraphEntity> => {
@@ -73,8 +91,34 @@ export const getEntityNeighborhood = async (entityId: string, depth: number = 2)
 }
 
 export const getGraphVisualization = async (centerEntity?: string, depth: number = 2, limit: number = 100): Promise<GraphVisualizationData> => {
-  const response = await api.get('/graph/visualization', {
-    params: { center_entity: centerEntity, depth, limit }
+  // Use contracts graph visualization endpoint (with security filtering)
+  try {
+    const response = await api.get('/graph/contracts/visualization', {
+      params: { center_entity: centerEntity, depth, limit }
+    })
+    return response.data.data || { nodes: [], edges: [] }
+  } catch (error: any) {
+    // Fallback to legacy endpoint if contracts endpoint not available
+    if (error.response?.status === 404) {
+      try {
+        const response = await api.get('/graph/visualization', {
+          params: { center_entity: centerEntity, depth, limit }
+        })
+        return response.data.data || { nodes: [], edges: [] }
+      } catch (legacyError: any) {
+        console.warn('Graph visualization failed:', legacyError)
+        return { nodes: [], edges: [] }
+      }
+    }
+    console.warn('Graph visualization failed:', error)
+    return { nodes: [], edges: [] }
+  }
+}
+
+export const getKBGraphVisualization = async (kbId?: string, centerEntity?: string, depth: number = 2, limit: number = 100): Promise<GraphVisualizationData> => {
+  // Use KB graph visualization endpoint (agent-only)
+  const response = await api.get('/graph/kb/visualization', {
+    params: { kb_id: kbId, center_entity: centerEntity, depth, limit }
   })
   return response.data.data
 }

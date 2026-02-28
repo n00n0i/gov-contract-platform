@@ -17,58 +17,8 @@ interface Notification {
   priority: 'high' | 'medium' | 'low'
 }
 
-const mockNotifications: Notification[] = [
-  {
-    id: 1,
-    type: 'contract_expiry',
-    title: 'สัญญาใกล้หมดอายุ',
-    message: 'สัญญา CNT-2024-015 จะหมดอายุในอีก 3 วัน',
-    time: '5 นาทีที่แล้ว',
-    read: false,
-    link: '/contracts',
-    priority: 'high'
-  },
-  {
-    id: 2,
-    type: 'payment',
-    title: 'การชำระเงิน',
-    message: 'งวดที่ 2 ของสัญญา CNT-2024-042 ครบกำหนดชำระวันพรุ่งนี้',
-    time: '30 นาทีที่แล้ว',
-    read: false,
-    link: '/contracts',
-    priority: 'high'
-  },
-  {
-    id: 3,
-    type: 'document',
-    title: 'อัปโหลดเอกสาร',
-    message: 'คุณสมชาย ได้อัปโหลดเอกสารใหม่ในสัญญา CNT-2024-058',
-    time: '1 ชั่วโมงที่แล้ว',
-    read: false,
-    link: '/contracts',
-    priority: 'medium'
-  },
-  {
-    id: 4,
-    type: 'approval',
-    title: 'รอการอนุมัติ',
-    message: 'สัญญา CNT-2024-060 รอการอนุมัติจากคุณ',
-    time: '2 ชั่วโมงที่แล้ว',
-    read: true,
-    link: '/contracts',
-    priority: 'medium'
-  },
-  {
-    id: 5,
-    type: 'system',
-    title: 'อัปเดตระบบ',
-    message: 'ระบบมีการอัปเดตเวอร์ชันใหม่ v2.1.0',
-    time: '5 ชั่วโมงที่แล้ว',
-    read: true,
-    link: '/settings',
-    priority: 'low'
-  },
-]
+// Notifications will be fetched from API
+const initialNotifications: Notification[] = []
 
 const notificationIcons: Record<string, React.ReactNode> = {
   contract_expiry: <AlertTriangle className="w-4 h-4" />,
@@ -89,7 +39,7 @@ const notificationColors: Record<string, string> = {
 export default function NotificationDropdown() {
   const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<Notification[]>(mockNotifications)
+  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const unreadCount = notifications.filter(n => !n.read).length

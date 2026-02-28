@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { 
-  FileText, Upload, CheckCircle, Eye, 
-  Search, Plus, Building2, Calendar, DollarSign, 
-  AlertCircle, ChevronRight, ChevronDown, X
+import {
+  FileText, Upload, CheckCircle, Eye,
+  Search, Plus, Building2, Calendar, DollarSign,
+  AlertCircle, ChevronRight, ChevronDown, X, Home
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import { FileUpload } from '../components/upload/FileUpload'
@@ -30,57 +30,57 @@ interface DocumentType {
 }
 
 const documentTypes: DocumentType[] = [
-  { 
-    value: 'contract', 
-    label: 'สัญญาหลัก', 
+  {
+    value: 'contract',
+    label: 'สัญญาหลัก',
     icon: FileText,
     description: 'สัญญาฉบับหลักที่ทำกับผู้รับจ้าง',
     requiresContract: false,
     color: 'blue'
   },
-  { 
-    value: 'amendment', 
-    label: 'สัญญาแก้ไข', 
+  {
+    value: 'amendment',
+    label: 'สัญญาแก้ไข',
     icon: FileText,
     description: 'บันทึกข้อตกลงแก้ไขเพิ่มเติม',
     requiresContract: true,
     color: 'purple'
   },
-  { 
-    value: 'guarantee', 
-    label: 'หนังสือค้ำประกัน', 
+  {
+    value: 'guarantee',
+    label: 'หนังสือค้ำประกัน',
     icon: FileText,
     description: 'หนังสือค้ำประกันการปฏิบัติงาน',
     requiresContract: true,
     color: 'green'
   },
-  { 
-    value: 'invoice', 
-    label: 'ใบแจ้งหนี้', 
+  {
+    value: 'invoice',
+    label: 'ใบแจ้งหนี้',
     icon: FileText,
     description: 'ใบแจ้งหนี้/ใบเสนอราคา',
     requiresContract: true,
     color: 'orange'
   },
-  { 
-    value: 'receipt', 
-    label: 'ใบเสร็จ', 
+  {
+    value: 'receipt',
+    label: 'ใบเสร็จ',
     icon: FileText,
     description: 'ใบเสร็จรับเงิน',
     requiresContract: true,
     color: 'teal'
   },
-  { 
-    value: 'delivery', 
-    label: 'ใบส่งมอบ', 
+  {
+    value: 'delivery',
+    label: 'ใบส่งมอบ',
     icon: FileText,
     description: 'ใบส่งมอบงาน/ใบตรวจรับ',
     requiresContract: true,
     color: 'indigo'
   },
-  { 
-    value: 'other', 
-    label: 'เอกสารอื่นๆ', 
+  {
+    value: 'other',
+    label: 'เอกสารอื่นๆ',
     icon: FileText,
     description: 'เอกสารที่ไม่เข้าหมวดหมู่',
     requiresContract: true,
@@ -114,6 +114,7 @@ export default function DocumentUpload() {
   const [loading, setLoading] = useState(false)
   const [recentDocuments, setRecentDocuments] = useState<any[]>([])
   const [showContractSelector, setShowContractSelector] = useState(!preselectedContractId)
+  const [uploadCompleted, setUploadCompleted] = useState(false)
 
   // Fetch contracts on mount
   useEffect(() => {
@@ -126,35 +127,11 @@ export default function DocumentUpload() {
   const fetchContracts = async () => {
     try {
       setLoading(true)
-      // TODO: Replace with actual API when contracts endpoint is ready
-      // const response = await api.get('/contracts?page_size=100')
-      // setContracts(response.data.items)
-      
-      // Mock data for now
-      setContracts([
-        {
-          id: 'CON-2024-001',
-          title: 'สัญญาก่อสร้างอาคารสำนักงาน',
-          contract_number: '65/2567',
-          value: 5500000,
-          status: 'active',
-          start_date: '2024-01-15',
-          end_date: '2024-12-31',
-          vendor_name: 'บริษัท ก่อสร้างไทย จำกัด'
-        },
-        {
-          id: 'CON-2024-002',
-          title: 'สัญญาจัดซื้อคอมพิวเตอร์',
-          contract_number: '78/2567',
-          value: 850000,
-          status: 'active',
-          start_date: '2024-02-01',
-          end_date: '2024-06-30',
-          vendor_name: 'บริษัท ไอที โซลูชั่น จำกัด'
-        }
-      ])
+      const response = await api.get('/contracts?page_size=100')
+      setContracts(response.data.items || [])
     } catch (error) {
       console.error('Failed to fetch contracts:', error)
+      setContracts([])
     } finally {
       setLoading(false)
     }
@@ -162,15 +139,6 @@ export default function DocumentUpload() {
 
   const fetchContractDetail = async (id: string) => {
     // TODO: Implement when API ready
-    setSelectedContract({
-      id: id,
-      title: 'สัญญาตัวอย่าง',
-      contract_number: 'XX/2567',
-      value: 0,
-      status: 'active',
-      start_date: '',
-      end_date: ''
-    })
     setStep('select-type')
   }
 
@@ -190,9 +158,18 @@ export default function DocumentUpload() {
     try {
       const response = await api.get('/documents?page_size=5')
       setRecentDocuments(response.data.items)
+      setUploadCompleted(true)
     } catch (error) {
       console.error('Failed to fetch documents:', error)
     }
+  }
+
+  const handleUploadMore = () => {
+    setUploadCompleted(false)
+    setStep('select-contract')
+    setSelectedContract(null)
+    setSelectedDocType('')
+    setShowContractSelector(true)
   }
 
   const formatCurrency = (value: number) => {
@@ -222,15 +199,15 @@ export default function DocumentUpload() {
     )
   }
 
-  const filteredContracts = contracts.filter(c => 
-    c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.contract_number.includes(searchQuery) ||
-    c.vendor_name?.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredContracts = contracts.filter(c =>
+    (c.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (c.contract_number || '').includes(searchQuery) ||
+    (c.vendor_name || '').toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   // Check if contract is selected and we can show other doc types
   const hasContract = selectedContract !== null
-  const availableDocTypes = documentTypes.filter(dt => 
+  const availableDocTypes = documentTypes.filter(dt =>
     dt.value === 'contract' || hasContract
   )
 
@@ -255,9 +232,9 @@ export default function DocumentUpload() {
                 </div>
                 <span className="ml-2 font-medium">เลือกสัญญา</span>
               </div>
-              
+
               <ChevronRight className="w-5 h-5 mx-4 text-gray-400" />
-              
+
               {/* Step 2 */}
               <div className={`flex items-center ${step === 'select-type' ? 'text-blue-600' : selectedDocType ? 'text-green-600' : 'text-gray-400'}`}>
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold
@@ -266,9 +243,9 @@ export default function DocumentUpload() {
                 </div>
                 <span className="ml-2 font-medium">เลือกประเภท</span>
               </div>
-              
+
               <ChevronRight className="w-5 h-5 mx-4 text-gray-400" />
-              
+
               {/* Step 3 */}
               <div className={`flex items-center ${step === 'upload' ? 'text-blue-600' : 'text-gray-400'}`}>
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold
@@ -438,7 +415,7 @@ export default function DocumentUpload() {
             <div className="text-center mb-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-2">เลือกประเภทเอกสาร</h2>
               <p className="text-gray-600">
-                {selectedContract 
+                {selectedContract
                   ? 'เลือกประเภทเอกสารที่ต้องการอัปโหลดสำหรับสัญญานี้'
                   : 'เลือกประเภทเอกสารที่ต้องการอัปโหลด'
                 }
@@ -460,26 +437,26 @@ export default function DocumentUpload() {
                       ${selectedDocType === type.value
                         ? `border-${type.color}-500 bg-${type.color}-50`
                         : isDisabled
-                        ? 'border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed'
-                        : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                          ? 'border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed'
+                          : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
                       }`}
                   >
                     <div className={`w-12 h-12 rounded-lg flex items-center justify-center mb-4
-                      ${selectedDocType === type.value 
-                        ? `bg-${type.color}-100` 
+                      ${selectedDocType === type.value
+                        ? `bg-${type.color}-100`
                         : 'bg-gray-100'}`}>
-                      <Icon className={`w-6 h-6 ${selectedDocType === type.value 
-                        ? `text-${type.color}-600` 
+                      <Icon className={`w-6 h-6 ${selectedDocType === type.value
+                        ? `text-${type.color}-600`
                         : 'text-gray-600'}`} />
                     </div>
-                    
-                    <h3 className={`font-semibold mb-1 ${selectedDocType === type.value 
-                      ? `text-${type.color}-900` 
+
+                    <h3 className={`font-semibold mb-1 ${selectedDocType === type.value
+                      ? `text-${type.color}-900`
                       : 'text-gray-900'}`}>
                       {type.label}
                     </h3>
-                    <p className={`text-sm ${selectedDocType === type.value 
-                      ? `text-${type.color}-700` 
+                    <p className={`text-sm ${selectedDocType === type.value
+                      ? `text-${type.color}-700`
                       : 'text-gray-600'}`}>
                       {type.description}
                     </p>
@@ -510,7 +487,7 @@ export default function DocumentUpload() {
                 <div className="text-sm text-blue-800">
                   <p className="font-medium mb-1">คำแนะนำ</p>
                   <p>
-                    {selectedContract 
+                    {selectedContract
                       ? 'เอกสารทั้งหมดจะถูกผูกกับสัญญาหลักที่เลือก สามารถดูเอกสารทั้งหมดได้จากหน้ารายละเอียดสัญญา'
                       : 'หากยังไม่มีสัญญาในระบบ ให้อัปโหลดสัญญาหลักก่อน จากนั้นจึงสามารถอัปโหลดเอกสารอื่นๆ ที่เกี่ยวข้องได้'
                     }
@@ -557,6 +534,26 @@ export default function DocumentUpload() {
                     setShowContractSelector(true)
                   }}
                 />
+
+                {/* Upload Success Actions */}
+                {uploadCompleted && (
+                  <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                    <button
+                      onClick={handleUploadMore}
+                      className="flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
+                    >
+                      <Upload className="w-5 h-5" />
+                      อัปโหลดเพิ่มเติม
+                    </button>
+                    <button
+                      onClick={() => navigate('/')}
+                      className="flex items-center justify-center gap-2 px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition font-medium"
+                    >
+                      <Home className="w-5 h-5" />
+                      กลับหน้าแรก
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 

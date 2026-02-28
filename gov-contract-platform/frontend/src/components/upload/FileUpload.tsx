@@ -148,8 +148,8 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
             ? { 
                 ...f, 
                 status: 'processing', 
-                documentId: response.data.id,
-                documentUrl: response.data.download_url
+                documentId: response.data.id
+                // Note: We use /view proxy endpoint instead of presigned URL
               }
             : f
         )
@@ -295,28 +295,24 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
   const handleViewDocument = async (file: UploadFile) => {
     if (!file.documentId) return
     
-    // If we already have the URL, open it directly
-    if (file.documentUrl) {
-      window.open(file.documentUrl, '_blank')
-      return
-    }
-    
-    // Otherwise fetch the download URL
     try {
-      const response = await api.get(`/documents/${file.documentId}/download`)
-      const downloadUrl = response.data.download_url
+      // Fetch document with auth headers through our API instance
+      // ResponseType 'blob' for binary data (PDF)
+      const response = await api.get(`/documents/${file.documentId}/view`, {
+        responseType: 'blob'
+      })
       
-      // Store URL for future use
-      setFiles(prev => prev.map(f => 
-        f.id === file.id 
-          ? { ...f, documentUrl: downloadUrl }
-          : f
-      ))
+      // Create blob URL from the response data
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const blobUrl = URL.createObjectURL(blob)
       
-      // Open in new tab
-      window.open(downloadUrl, '_blank')
+      // Open blob URL in new tab
+      window.open(blobUrl, '_blank')
+      
+      // Clean up blob URL after a delay (browser will keep it for the tab)
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
     } catch (error) {
-      console.error('Failed to get document URL:', error)
+      console.error('Failed to view document:', error)
       alert('ไม่สามารถเปิดเอกสารได้')
     }
   }

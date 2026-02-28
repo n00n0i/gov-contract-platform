@@ -21,89 +21,8 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Mock notifications data
-const mockNotifications = [
-  {
-    id: 1,
-    type: 'contract_expiry',
-    title: 'สัญญาใกล้หมดอายุ',
-    message: 'สัญญา CNT-2024-015 จะหมดอายุในอีก 3 วัน',
-    time: '5 นาทีที่แล้ว',
-    read: false,
-    link: '/contracts/CNT-2024-015',
-    priority: 'high'
-  },
-  {
-    id: 2,
-    type: 'payment',
-    title: 'การชำระเงิน',
-    message: 'งวดที่ 2 ของสัญญา CNT-2024-042 ครบกำหนดชำระวันพรุ่งนี้',
-    time: '30 นาทีที่แล้ว',
-    read: false,
-    link: '/contracts/CNT-2024-042',
-    priority: 'high'
-  },
-  {
-    id: 3,
-    type: 'document',
-    title: 'อัปโหลดเอกสาร',
-    message: 'คุณสมชาย ได้อัปโหลดเอกสารใหม่ในสัญญา CNT-2024-058',
-    time: '1 ชั่วโมงที่แล้ว',
-    read: false,
-    link: '/contracts/CNT-2024-058',
-    priority: 'medium'
-  },
-  {
-    id: 4,
-    type: 'approval',
-    title: 'รอการอนุมัติ',
-    message: 'สัญญา CNT-2024-060 รอการอนุมัติจากคุณ',
-    time: '2 ชั่วโมงที่แล้ว',
-    read: true,
-    link: '/contracts/CNT-2024-060',
-    priority: 'medium'
-  },
-  {
-    id: 5,
-    type: 'system',
-    title: 'อัปเดตระบบ',
-    message: 'ระบบมีการอัปเดตเวอร์ชันใหม่ v2.1.0',
-    time: '5 ชั่วโมงที่แล้ว',
-    read: true,
-    link: '/settings',
-    priority: 'low'
-  },
-  {
-    id: 6,
-    type: 'contract_expiry',
-    title: 'สัญญาหมดอายุแล้ว',
-    message: 'สัญญา CNT-2023-089 หมดอายุแล้ว กรุณาดำเนินการต่ออายุ',
-    time: '1 วันที่แล้ว',
-    read: true,
-    link: '/contracts/CNT-2023-089',
-    priority: 'high'
-  },
-  {
-    id: 7,
-    type: 'vendor',
-    title: 'ผู้รับจ้างใหม่',
-    message: 'มีผู้รับจ้างรายใหม่ลงทะเบียน: บริษัท เทคโนโลยี จำกัด',
-    time: '2 วันที่แล้ว',
-    read: true,
-    link: '/vendors',
-    priority: 'low'
-  },
-  {
-    id: 8,
-    type: 'payment',
-    title: 'ชำระเงินสำเร็จ',
-    message: 'การชำระเงินงวดที่ 1 ของสัญญา CNT-2024-055 เสร็จสมบูรณ์',
-    time: '3 วันที่แล้ว',
-    read: true,
-    link: '/contracts/CNT-2024-055',
-    priority: 'low'
-  },
-]
+// Notifications will be fetched from API
+const initialNotifications: any[] = []
 
 const notificationIcons = {
   contract_expiry: <AlertTriangle className="w-5 h-5" />,
@@ -125,7 +44,7 @@ const notificationColors = {
 
 export default function Notifications() {
   const navigate = useNavigate()
-  const [notifications, setNotifications] = useState(mockNotifications)
+  const [notifications, setNotifications] = useState(initialNotifications)
   const [filter, setFilter] = useState<'all' | 'unread' | 'high'>('all')
   const [loading, setLoading] = useState(false)
 
@@ -158,7 +77,7 @@ export default function Notifications() {
     }
   }
 
-  const handleNotificationClick = (notification: typeof mockNotifications[0]) => {
+  const handleNotificationClick = (notification: any) => {
     markAsRead(notification.id)
     navigate(notification.link)
   }

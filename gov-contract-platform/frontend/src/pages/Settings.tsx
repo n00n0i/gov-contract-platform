@@ -22,6 +22,8 @@ import {
   getAISettings, saveAISettings, saveAIFeatures,
   getRagSettings, saveRagSettings,
   getGraphRAGSettings, saveGraphRAGSettings,
+  getContractsGraphRAGSettings, saveContractsGraphRAGSettings,
+  getKBGraphRAGSettings, saveKBGraphRAGSettings,
   getGraphStats, searchGraphEntities,
   checkHealth
 } from '../services/settingsService'
@@ -1033,11 +1035,24 @@ export default function Settings() {
     chunkOverlap: 50
   })
 
-  // GraphRAG Settings
-  const [graphragSettings, setGraphragSettings] = useState({
-    auto_extract_on_upload: false,
+  // Contracts GraphRAG Settings (with security controls)
+  const [contractsGraphragSettings, setContractsGraphragSettings] = useState({
+    enabled: true,
+    auto_extract_on_upload: true,
     extract_relationships: true,
-    min_confidence: 0.7
+    min_confidence: 0.7,
+    respect_security_levels: true,
+    respect_department_hierarchy: true
+  })
+
+  // Knowledge Base GraphRAG Settings (agent-only)
+  const [kbGraphragSettings, setKbGraphragSettings] = useState({
+    enabled: true,
+    auto_extract_on_upload: true,
+    extract_relationships: true,
+    min_confidence: 0.7,
+    enable_cross_kb_links: true,
+    shared_entity_threshold: 2
   })
 
   // GraphRAG Stats
@@ -1438,12 +1453,20 @@ export default function Settings() {
         console.error('Failed to fetch RAG settings:', err)
       }
 
-      // Load GraphRAG settings
+      // Load Contracts GraphRAG settings
       try {
-        const grag = await getGraphRAGSettings()
-        if (grag) setGraphragSettings(prev => ({ ...prev, ...grag }))
+        const contractsGrag = await getContractsGraphRAGSettings()
+        if (contractsGrag) setContractsGraphragSettings(prev => ({ ...prev, ...contractsGrag }))
       } catch (err) {
-        console.error('Failed to fetch GraphRAG settings:', err)
+        console.error('Failed to fetch Contracts GraphRAG settings:', err)
+      }
+
+      // Load Knowledge Base GraphRAG settings
+      try {
+        const kbGrag = await getKBGraphRAGSettings()
+        if (kbGrag) setKbGraphragSettings(prev => ({ ...prev, ...kbGrag }))
+      } catch (err) {
+        console.error('Failed to fetch KB GraphRAG settings:', err)
       }
     } catch (err) {
       console.error('Failed to fetch settings:', err)
@@ -1455,10 +1478,12 @@ export default function Settings() {
     try {
       const stats = await getGraphStats()
       if (stats) {
+        // Use contracts graph stats (separate from knowledge_base)
+        const contractsStats = stats.contracts || stats
         setGraphStats({
-          total_entities: stats.total_entities || 0,
-          total_relationships: stats.total_relationships || 0,
-          total_documents: stats.total_documents || 0
+          total_entities: contractsStats.total_entities || 0,
+          total_relationships: contractsStats.total_relationships || 0,
+          total_documents: contractsStats.total_documents || 0
         })
       }
     } catch (err) {
@@ -1472,7 +1497,9 @@ export default function Settings() {
     if (!entitySearchQuery.trim()) return
     setEntitySearchLoading(true)
     try {
+      console.log('Searching entities:', entitySearchQuery)
       const results = await searchGraphEntities(entitySearchQuery)
+      console.log('Search results:', results)
       setEntitySearchResults(results || [])
     } catch (err) {
       console.error('Entity search failed:', err)
@@ -3892,162 +3919,336 @@ export default function Settings() {
             {/* GraphRAG */}
             {activeTab === 'graphrag' && (
               <div className="space-y-6">
+                {/* Contracts GraphRAG */}
                 <div className="bg-white rounded-xl shadow-sm border p-6">
                   <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
-                      <Workflow className="w-6 h-6 text-purple-600" />
+                      <div className="p-2 bg-blue-100 rounded-lg">
+                        <Workflow className="w-6 h-6 text-blue-600" />
+                      </div>
                       <div>
-                        <h2 className="text-lg font-semibold text-gray-900">GraphRAG</h2>
-                        <p className="text-sm text-gray-500">Knowledge Graph สำหรับ AI Agents</p>
+                        <h2 className="text-lg font-semibold text-gray-900">Contracts GraphRAG</h2>
+                        <p className="text-sm text-gray-500">Knowledge Graph สำหรับสัญญา - มีการคุมสิทธิ์ตามโครงสร้างหน่วยงานและชั้นความลับ</p>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Graph Stats */}
-                  <div className="grid grid-cols-3 gap-4 mb-6">
-                    <div className="p-4 bg-blue-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-blue-600">
-                        {graphStatsLoading ? <span className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /> : graphStats.total_entities}
-                      </p>
-                      <p className="text-sm text-blue-600/70">Entities (สิ่ง)</p>
-                    </div>
-                    <div className="p-4 bg-green-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-green-600">
-                        {graphStatsLoading ? <span className="inline-block w-6 h-6 border-2 border-green-600 border-t-transparent rounded-full animate-spin" /> : graphStats.total_relationships}
-                      </p>
-                      <p className="text-sm text-green-600/70">ความสัมพันธ์</p>
-                    </div>
-                    <div className="p-4 bg-purple-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-purple-600">
-                        {graphStatsLoading ? <span className="inline-block w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" /> : graphStats.total_documents}
-                      </p>
-                      <p className="text-sm text-purple-600/70">เอกสาร</p>
-                    </div>
-                  </div>
-
-                  {/* Graph Visualization */}
-                  <div className="mb-6">
-                    <h3 className="font-medium text-gray-900 mb-3">มุมมองกราฟ Knowledge</h3>
-                    <GraphVisualization height={400} />
-                  </div>
-
-                  {/* Entity Search */}
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <h3 className="font-medium text-gray-900 mb-3">ค้นหา Entity</h3>
-                    <div className="flex gap-3">
+                    <label className="relative inline-flex items-center cursor-pointer">
                       <input
-                        type="text"
-                        value={entitySearchQuery}
-                        onChange={(e) => setEntitySearchQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleEntitySearch()}
-                        placeholder="ค้นหา บุคคล, องค์กร, สัญญา..."
-                        className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={contractsGraphragSettings.enabled}
+                        onChange={(e) => setContractsGraphragSettings({ ...contractsGraphragSettings, enabled: e.target.checked })}
                       />
-                      <button
-                        onClick={handleEntitySearch}
-                        disabled={entitySearchLoading}
-                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:opacity-50 flex items-center gap-2"
-                      >
-                        {entitySearchLoading ? (
-                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        ) : null}
-                        ค้นหา
-                      </button>
-                    </div>
-                    {entitySearchResults.length > 0 && (
-                      <div className="mt-3 space-y-2">
-                        {entitySearchResults.map((entity: any) => (
-                          <div key={entity.id} className="flex items-center justify-between p-2 bg-white rounded border">
-                            <div>
-                              <span className="font-medium text-gray-900">{entity.name}</span>
-                              <span className="ml-2 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">{entity.type}</span>
-                            </div>
-                            <span className="text-xs text-gray-400">{(entity.confidence * 100).toFixed(0)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {entitySearchResults.length === 0 && entitySearchQuery && !entitySearchLoading && (
-                      <p className="mt-2 text-sm text-gray-500">ไม่พบ Entity ที่ตรงกับ "{entitySearchQuery}"</p>
-                    )}
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
                   </div>
+
+                  {contractsGraphragSettings.enabled && (
+                    <>
+                      {/* Graph Stats */}
+                      <div className="grid grid-cols-3 gap-4 mb-6">
+                        <div className="p-4 bg-blue-50 rounded-lg text-center">
+                          <p className="text-2xl font-bold text-blue-600">
+                            {graphStatsLoading ? <span className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /> : graphStats.total_entities}
+                          </p>
+                          <p className="text-sm text-blue-600/70">Entities (สิ่ง)</p>
+                        </div>
+                        <div className="p-4 bg-green-50 rounded-lg text-center">
+                          <p className="text-2xl font-bold text-green-600">
+                            {graphStatsLoading ? <span className="inline-block w-6 h-6 border-2 border-green-600 border-t-transparent rounded-full animate-spin" /> : graphStats.total_relationships}
+                          </p>
+                          <p className="text-sm text-green-600/70">ความสัมพันธ์</p>
+                        </div>
+                        <div className="p-4 bg-purple-50 rounded-lg text-center">
+                          <p className="text-2xl font-bold text-purple-600">
+                            {graphStatsLoading ? <span className="inline-block w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" /> : graphStats.total_documents}
+                          </p>
+                          <p className="text-sm text-purple-600/70">เอกสาร</p>
+                        </div>
+                      </div>
+
+                      {/* Graph Visualization */}
+                      <div className="mb-6">
+                        <h3 className="font-medium text-gray-900 mb-3">มุมมองกราฟ Contracts</h3>
+                        <GraphVisualization height={300} />
+                      </div>
+
+                      {/* Entity Search */}
+                      <div className="p-4 bg-gray-50 rounded-lg mb-6">
+                        <h3 className="font-medium text-gray-900 mb-3">ค้นหา Entity</h3>
+                        <div className="flex gap-3">
+                          <input
+                            type="text"
+                            value={entitySearchQuery}
+                            onChange={(e) => setEntitySearchQuery(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleEntitySearch()}
+                            placeholder="ค้นหา บุคคล, องค์กร, สัญญา..."
+                            className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                          <button
+                            onClick={handleEntitySearch}
+                            disabled={entitySearchLoading}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
+                          >
+                            {entitySearchLoading ? (
+                              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : null}
+                            ค้นหา
+                          </button>
+                        </div>
+                        {entitySearchResults.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {entitySearchResults.map((entity: any) => (
+                              <div key={entity.id} className="flex items-center justify-between p-2 bg-white rounded border">
+                                <div>
+                                  <span className="font-medium text-gray-900">{entity.name}</span>
+                                  <span className="ml-2 text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">{entity.type}</span>
+                                </div>
+                                <span className="text-xs text-gray-400">{(entity.confidence * 100).toFixed(0)}%</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {entitySearchResults.length === 0 && entitySearchQuery && !entitySearchLoading && (
+                          <p className="mt-2 text-sm text-gray-500">ไม่พบ Entity ที่ตรงกับ "{entitySearchQuery}"</p>
+                        )}
+                      </div>
+
+                      {/* Contracts GraphRAG Settings */}
+                      <div className="border-t pt-4">
+                        <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                          <Shield className="w-5 h-5" />
+                          การตั้งค่าความปลอดภัย
+                        </h3>
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between py-3 border-b">
+                            <div>
+                              <p className="font-medium text-gray-900">สกัดอัตโนมัติตอนอัพโหลด</p>
+                              <p className="text-sm text-gray-500">สกัด entities อัตโนมัติเมื่ออัพโหลดเอกสารสัญญาใหม่</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="sr-only peer"
+                                checked={contractsGraphragSettings.auto_extract_on_upload}
+                                onChange={(e) => setContractsGraphragSettings({ ...contractsGraphragSettings, auto_extract_on_upload: e.target.checked })}
+                              />
+                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                          </div>
+                          <div className="flex items-center justify-between py-3 border-b">
+                            <div>
+                              <p className="font-medium text-gray-900">สกัดความสัมพันธ์</p>
+                              <p className="text-sm text-gray-500">สกัดความสัมพันธ์ระหว่าง entities</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="sr-only peer"
+                                checked={contractsGraphragSettings.extract_relationships}
+                                onChange={(e) => setContractsGraphragSettings({ ...contractsGraphragSettings, extract_relationships: e.target.checked })}
+                              />
+                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                          </div>
+                          <div className="flex items-center justify-between py-3 border-b">
+                            <div>
+                              <p className="font-medium text-gray-900">ความมั่นใจขั้นต่ำ</p>
+                              <p className="text-sm text-gray-500">ค่าความมั่นใจขั้นต่ำสำหรับยอมรับ entity (0.5-0.9)</p>
+                            </div>
+                            <input
+                              type="number"
+                              min="0.5"
+                              max="0.9"
+                              step="0.1"
+                              value={contractsGraphragSettings.min_confidence}
+                              onChange={(e) => setContractsGraphragSettings({ ...contractsGraphragSettings, min_confidence: parseFloat(e.target.value) })}
+                              className="w-20 px-3 py-2 border rounded-lg text-center"
+                            />
+                          </div>
+                          <div className="flex items-center justify-between py-3 border-b">
+                            <div>
+                              <p className="font-medium text-gray-900">คุมสิทธิ์ตามชั้นความลับ</p>
+                              <p className="text-sm text-gray-500">ผู้ใช้จะเห็นเฉพาะข้อมูลที่มีชั้นความลับไม่เกินสิทธิ์ของตน</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="sr-only peer"
+                                checked={contractsGraphragSettings.respect_security_levels}
+                                onChange={(e) => setContractsGraphragSettings({ ...contractsGraphragSettings, respect_security_levels: e.target.checked })}
+                              />
+                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                          </div>
+                          <div className="flex items-center justify-between py-3">
+                            <div>
+                              <p className="font-medium text-gray-900">คุมสิทธิ์ตามโครงสร้างหน่วยงาน</p>
+                              <p className="text-sm text-gray-500">ผู้ใช้จะเห็นเฉพาะข้อมูลในหน่วยงานของตนและหน่วยงานย่อย</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="sr-only peer"
+                                checked={contractsGraphragSettings.respect_department_hierarchy}
+                                onChange={(e) => setContractsGraphragSettings({ ...contractsGraphragSettings, respect_department_hierarchy: e.target.checked })}
+                              />
+                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Save Contracts GraphRAG Settings */}
+                      <div className="mt-4 pt-4 border-t flex justify-end">
+                        <button
+                          onClick={async () => {
+                            setSaving(true)
+                            try {
+                              await saveContractsGraphRAGSettings(contractsGraphragSettings)
+                              setMessage({ type: 'success', text: 'บันทึกการตั้งค่า Contracts GraphRAG สำเร็จ' })
+                            } catch (err: any) {
+                              setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถบันทึกได้' })
+                            } finally {
+                              setSaving(false)
+                            }
+                          }}
+                          disabled={saving}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50"
+                        >
+                          <Save className="w-4 h-4" />
+                          {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
 
-                {/* Graph Extraction Settings */}
+                {/* Knowledge Base GraphRAG */}
                 <div className="bg-white rounded-xl shadow-sm border p-6">
-                  <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <Cpu className="w-5 h-5" />
-                    การสกัด Entity
-                  </h3>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between py-3 border-b">
-                      <div>
-                        <p className="font-medium text-gray-900">สกัดอัตโนมัติตอนอัพโหลด</p>
-                        <p className="text-sm text-gray-500">สกัด entities อัตโนมัติเมื่ออัพโหลดเอกสารใหม่</p>
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-purple-100 rounded-lg">
+                        <Workflow className="w-6 h-6 text-purple-600" />
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          className="sr-only peer"
-                          checked={graphragSettings.auto_extract_on_upload}
-                          onChange={(e) => setGraphragSettings({ ...graphragSettings, auto_extract_on_upload: e.target.checked })}
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                      </label>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Knowledge Base GraphRAG</h2>
+                        <p className="text-sm text-gray-500">Knowledge Graph สำหรับ Knowledge Base - ใช้โดย AI Agents เท่านั้น</p>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between py-3 border-b">
-                      <div>
-                        <p className="font-medium text-gray-900">สกัดความสัมพันธ์</p>
-                        <p className="text-sm text-gray-500">สกัดความสัมพันธ์ระหว่าง entities</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          className="sr-only peer"
-                          checked={graphragSettings.extract_relationships}
-                          onChange={(e) => setGraphragSettings({ ...graphragSettings, extract_relationships: e.target.checked })}
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                      </label>
-                    </div>
-                    <div className="flex items-center justify-between py-3">
-                      <div>
-                        <p className="font-medium text-gray-900">ความมั่นใจขั้นต่ำ</p>
-                        <p className="text-sm text-gray-500">ค่าความมั่นใจขั้นต่ำสำหรับยอมรับ entity (0.5-0.9)</p>
-                      </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
                       <input
-                        type="number"
-                        min="0.5"
-                        max="0.9"
-                        step="0.1"
-                        value={graphragSettings.min_confidence}
-                        onChange={(e) => setGraphragSettings({ ...graphragSettings, min_confidence: parseFloat(e.target.value) })}
-                        className="w-20 px-3 py-2 border rounded-lg text-center"
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={kbGraphragSettings.enabled}
+                        onChange={(e) => setKbGraphragSettings({ ...kbGraphragSettings, enabled: e.target.checked })}
                       />
-                    </div>
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                    </label>
                   </div>
 
-                  {/* Save GraphRAG Settings */}
-                  <div className="mt-4 pt-4 border-t flex justify-end">
-                    <button
-                      onClick={async () => {
-                        setSaving(true)
-                        try {
-                          await saveGraphRAGSettings(graphragSettings)
-                          setMessage({ type: 'success', text: 'บันทึกการตั้งค่า GraphRAG สำเร็จ' })
-                        } catch (err: any) {
-                          setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถบันทึกได้' })
-                        } finally {
-                          setSaving(false)
-                        }
-                      }}
-                      disabled={saving}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <Save className="w-4 h-4" />
-                      {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า GraphRAG'}
-                    </button>
-                  </div>
+                  {kbGraphragSettings.enabled && (
+                    <>
+                      {/* KB GraphRAG Settings */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between py-3 border-b">
+                          <div>
+                            <p className="font-medium text-gray-900">สกัดอัตโนมัติตอนอัพโหลด</p>
+                            <p className="text-sm text-gray-500">สกัด entities อัตโนมัติเมื่ออัพโหลดเอกสารเข้า Knowledge Base</p>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={kbGraphragSettings.auto_extract_on_upload}
+                              onChange={(e) => setKbGraphragSettings({ ...kbGraphragSettings, auto_extract_on_upload: e.target.checked })}
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                          </label>
+                        </div>
+                        <div className="flex items-center justify-between py-3 border-b">
+                          <div>
+                            <p className="font-medium text-gray-900">สกัดความสัมพันธ์</p>
+                            <p className="text-sm text-gray-500">สกัดความสัมพันธ์ระหว่าง entities</p>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={kbGraphragSettings.extract_relationships}
+                              onChange={(e) => setKbGraphragSettings({ ...kbGraphragSettings, extract_relationships: e.target.checked })}
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                          </label>
+                        </div>
+                        <div className="flex items-center justify-between py-3 border-b">
+                          <div>
+                            <p className="font-medium text-gray-900">ความมั่นใจขั้นต่ำ</p>
+                            <p className="text-sm text-gray-500">ค่าความมั่นใจขั้นต่ำสำหรับยอมรับ entity (0.5-0.9)</p>
+                          </div>
+                          <input
+                            type="number"
+                            min="0.5"
+                            max="0.9"
+                            step="0.1"
+                            value={kbGraphragSettings.min_confidence}
+                            onChange={(e) => setKbGraphragSettings({ ...kbGraphragSettings, min_confidence: parseFloat(e.target.value) })}
+                            className="w-20 px-3 py-2 border rounded-lg text-center"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between py-3 border-b">
+                          <div>
+                            <p className="font-medium text-gray-900">เปิดเชื่อมโยงข้าม Knowledge Base</p>
+                            <p className="text-sm text-gray-500">AI Agent สามารถเห็นความสัมพันธ์ข้าม KB ได้</p>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={kbGraphragSettings.enable_cross_kb_links}
+                              onChange={(e) => setKbGraphragSettings({ ...kbGraphragSettings, enable_cross_kb_links: e.target.checked })}
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                          </label>
+                        </div>
+                        <div className="flex items-center justify-between py-3">
+                          <div>
+                            <p className="font-medium text-gray-900">เกณฑ์ Entity ที่ใช้ร่วมกัน</p>
+                            <p className="text-sm text-gray-500">จำนวน entity ที่ต้องมีร่วมกันถึงจะถือว่า KB เชื่อมโยงกัน</p>
+                          </div>
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            value={kbGraphragSettings.shared_entity_threshold}
+                            onChange={(e) => setKbGraphragSettings({ ...kbGraphragSettings, shared_entity_threshold: parseInt(e.target.value) })}
+                            className="w-20 px-3 py-2 border rounded-lg text-center"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Save KB GraphRAG Settings */}
+                      <div className="mt-4 pt-4 border-t flex justify-end">
+                        <button
+                          onClick={async () => {
+                            setSaving(true)
+                            try {
+                              await saveKBGraphRAGSettings(kbGraphragSettings)
+                              setMessage({ type: 'success', text: 'บันทึกการตั้งค่า Knowledge Base GraphRAG สำเร็จ' })
+                            } catch (err: any) {
+                              setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถบันทึกได้' })
+                            } finally {
+                              setSaving(false)
+                            }
+                          }}
+                          disabled={saving}
+                          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2 disabled:opacity-50"
+                        >
+                          <Save className="w-4 h-4" />
+                          {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -5054,9 +5255,9 @@ function StorageSettings() {
     }
   }
 
-  // Clear All Storage (MinIO + RAG)
+  // Clear All Storage (MinIO + RAG + GraphRAG)
   const handleClearAllStorage = async () => {
-    if (!confirm('⚠️ คำเตือน: การล้างข้อมูลทั้งหมด\n\nการกระทำนี้จะ:\n• ลบไฟล์ทั้งหมดจาก MinIO\n• ลบข้อมูล RAG ทั้งหมด\n• ไฟล์จะถูก soft-delete (สามารถกู้คืนจาก Database ได้)\n\nคุณแน่ใจหรือไม่?')) {
+    if (!confirm('⚠️ คำเตือน: การล้างข้อมูลทั้งหมด\n\nการกระทำนี้จะ:\n• ลบไฟล์ทั้งหมดจาก MinIO\n• ลบข้อมูล RAG ทั้งหมด\n• ลบ GraphRAG (Entities, Relationships) ทั้งหมด\n• ไฟล์จะถูก soft-delete (สามารถกู้คืนจาก Database ได้)\n\nคุณแน่ใจหรือไม่?')) {
       return
     }
     
@@ -5082,9 +5283,13 @@ function StorageSettings() {
 
       if (response.ok) {
         const result = await response.json()
-        setMessage({ type: 'success', text: `ล้างข้อมูลสำเร็จ: ${result.deleted_files || 0} ไฟล์ถูกลบ` })
+        const graphMsg = result.deleted_graph_entities > 0 
+          ? `, Graph: ${result.deleted_graph_entities} entities, ${result.deleted_graph_relationships} relations` 
+          : ''
+        setMessage({ type: 'success', text: `ล้างข้อมูลสำเร็จ: ${result.deleted_files || 0} ไฟล์${graphMsg}` })
         fetchMinioStats()
         fetchRagStats()
+        // Note: GraphRAG stats will refresh on page reload or tab switch
         setTimeout(() => setMessage(null), 3000)
       } else {
         const error = await response.json()
@@ -5459,7 +5664,7 @@ function StorageSettings() {
               <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-100">
                 <div>
                   <p className="font-medium text-red-900">ล้างข้อมูลทั้งหมด</p>
-                  <p className="text-sm text-red-600">ลบไฟล์ทั้งหมดจาก MinIO และข้อมูล RAG (ไม่สามารถกู้คืนได้)</p>
+                  <p className="text-sm text-red-600">ลบไฟล์ทั้งหมดจาก MinIO, RAG, และ GraphRAG (ไม่สามารถกู้คืนได้)</p>
                 </div>
                 <button
                   onClick={handleClearAllStorage}

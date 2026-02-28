@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gov Contract Platform - AI Agent Configuration Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            height: 100vh;
+            background: linear-gradient(180deg, #1a365d 0%, #2c5282 100%);
+            position: fixed;
+            left: 0;
+            top: 0;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            padding: 0 20px 30px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: #4299e1;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-menu {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .nav-item {
+            margin-bottom: 5px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            border-radius: 8px;
+            margin: 0 10px;
+            transition: all 0.3s;
+        }
+
+        .nav-link:hover,
+        .nav-link.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .nav-icon {
+            width: 24px;
+            margin-right: 12px;
+            text-align: center;
+        }
+
+        /* Main Content */
+        .main-content {
+            margin-left: 260px;
+            padding: 30px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            color: #1a365d;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #4299e1;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #3182ce;
+        }
+
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #e53e3e;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ecc94b;
+            color: #744210;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* Agent List */
+        .agent-list {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+        }
+
+        .list-header {
+            padding: 15px 20px;
+            background: #f7fafc;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .list-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a365d;
+        }
+
+        .list-stats {
+            font-size: 14px;
+            color: #718096;
+        }
+
+        /* Agent Card */
+        .agent-card {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+            transition: all 0.3s;
+        }
+
+        .agent-card:hover {
+            background: #f7fafc;
+        }
+
+        .agent-card:last-child {
+            border-bottom: none;
+        }
+
+        .agent-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .agent-info {
+            flex: 1;
+        }
+
+        .agent-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a365d;
+            margin-bottom: 8px;
+        }
+
+        .agent-desc {
+            font-size: 14px;
+            color: #718096;
+            margin-bottom: 10px;
+        }
+
+        .agent-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 12px;
+            color: #718096;
+        }
+
+        .agent-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .agent-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-active {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .status-paused {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+
+        .status-error {
+            background: #cbd5e0;
+            color: #2d3748;
+        }
+
+        .agent-actions {
+            display: flex;
+            gap: 10px;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+
+        .agent-tags {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .tag {
+            padding: 4px 10px;
+            background: #ebf8ff;
+            color: #2b6cb0;
+            border-radius: 15px;
+            font-size: 12px;
+        }
+
+        /* Create Agent Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 12px;
+            width: 800px;
+            max-width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            padding: 20px 30px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a365d;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #718096;
+        }
+
+        .modal-body {
+            padding: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 8px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #4299e1;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .form-section {
+            background: #f7fafc;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .form-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a365d;
+            margin-bottom: 15px;
+        }
+
+        .form-section .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-section .form-row {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .modal-footer {
+            padding: 20px 30px;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        /* Agent Detail View */
+        .agent-detail {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+        }
+
+        .detail-header {
+            padding: 25px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .detail-info h1 {
+            font-size: 24px;
+            color: #1a365d;
+            margin-bottom: 10px;
+        }
+
+        .detail-info p {
+            color: #718096;
+            margin-bottom: 15px;
+        }
+
+        .detail-tabs {
+            display: flex;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .tab {
+            padding: 15px 25px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #718096;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab:hover {
+            color: #4299e1;
+            background: #f7fafc;
+        }
+
+        .tab.active {
+            color: #4299e1;
+            border-bottom-color: #4299e1;
+        }
+
+        .detail-content {
+            padding: 25px;
+        }
+
+        .detail-section {
+            margin-bottom: 30px;
+        }
+
+        .detail-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a365d;
+            margin-bottom: 15px;
+        }
+
+        .detail-value {
+            font-size: 14px;
+            color: #2d3748;
+            line-height: 1.6;
+        }
+
+        .detail-value pre {
+            background: #f7fafc;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .detail-item {
+            background: #f7fafc;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .detail-item-label {
+            font-size: 12px;
+            color: #718096;
+            margin-bottom: 5px;
+        }
+
+        .detail-item-value {
+            font-size: 14px;
+            font-weight: 500;
+            color: #2d3748;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 70px;
+            }
+
+            .sidebar-header,
+            .nav-link span {
+                display: none;
+            }
+
+            .nav-link {
+                justify-content: center;
+            }
+
+            .nav-icon {
+                margin-right: 0;
+            }
+
+            .main-content {
+                margin-left: 70px;
+                padding: 20px;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .agent-actions {
+                align-items: stretch;
+            }
+
+            .modal {
+                width: 95%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">📄</div>
+                <span>ContractMGMT</span>
+            </div>
+        </div>
+        <ul class="nav-menu">
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📊</span>
+                    <span>Dashboard</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📋</span>
+                    <span>สัญญาทั้งหมด</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🏢</span>
+                    <span>ผู้รับจ้าง</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📄</span>
+                    <span>เทมเพลต</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link active">
+                    <span class="nav-icon">🤖</span>
+                    <span>AI Agents</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🔍</span>
+                    <span>Knowledge Base</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">🔔</span>
+                    <span>การแจ้งเตือน</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">📊</span>
+                    <span>รายงาน</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link">
+                    <span class="nav-icon">⚙️</span>
+                    <span>การตั้งค่า</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="header">
+            <div>
+                <h1>AI Agents</h1>
+                <p style="color: #718096;">จัดการและกำหนดค่า AI Agents สำหรับระบบอัตโนมัติ</p>
+            </div>
+            <button class="btn btn-success" onclick="openCreateModal()">➕ สร้าง AI Agent ใหม่</button>
+        </header>
+
+        <!-- Agent List -->
+        <div class="agent-list">
+            <div class="list-header">
+                <div class="list-title">AI Agents ทั้งหมด</div>
+                <div class="list-stats">แสดง 3 ของ 12 Agents</div>
+            </div>
+
+            <!-- Agent Card 1 -->
+            <div class="agent-card">
+                <div class="agent-header">
+                    <div class="agent-info">
+                        <div class="agent-name">Contract Risk Analyzer</div>
+                        <div class="agent-desc">วิเคราะห์ความเสี่ยงในสัญญาก่อนอนุมัติ
+                            ตรวจสอบเงื่อนไขที่เสี่ยงและให้คำแนะนำ</div>
+                        <div class="agent-meta">
+                            <span class="agent-meta-item">📊 ความแม่นยำ: 92%</span>
+                            <span class="agent-meta-item">⏱️ เวลาเฉลี่ย: 45 วิ</span>
+                            <span class="agent-meta-item">🚀 ใช้งานแล้ว: 1,247 ครั้ง</span>
+                        </div>
+                        <div class="agent-tags">
+                            <span class="tag">Risk Analysis</span>
+                            <span class="tag">Contract Review</span>
+                            <span class="tag">AI-Powered</span>
+                        </div>
+                    </div>
+                    <div class="agent-actions">
+                        <span class="agent-status status-active">Active</span>
+                        <button class="btn btn-primary btn-sm">ดู</button>
+                        <button class="btn btn-secondary btn-sm">แก้ไข</button>
+                        <button class="btn btn-danger btn-sm">ลบ</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent Card 2 -->
+            <div class="agent-card">
+                <div class="agent-header">
+                    <div class="agent-info">
+                        <div class="agent-name">Document Extractor</div>
+                        <div class="agent-desc">แยกข้อมูลสำคัญจากเอกสาร PDF และรูปภาพด้วย OCR และ AI</div>
+                        <div class="agent-meta">
+                            <span class="agent-meta-item">📊 ความแม่นยำ: 88%</span>
+                            <span class="agent-meta-item">⏱️ เวลาเฉลี่ย: 32 วิ</span>
+                            <span class="agent-meta-item">🚀 ใช้งานแล้ว: 892 ครั้ง</span>
+                        </div>
+                        <div class="agent-tags">
+                            <span class="tag">OCR</span>
+                            <span class="tag">Data Extraction</span>
+                            <span class="tag">Document Processing</span>
+                        </div>
+                    </div>
+                    <div class="agent-actions">
+                        <span class="agent-status status-active">Active</span>
+                        <button class="btn btn-primary btn-sm">ดู</button>
+                        <button class="btn btn-secondary btn-sm">แก้ไข</button>
+                        <button class="btn btn-danger btn-sm">ลบ</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent Card 3 -->
+            <div class="agent-card">
+                <div class="agent-header">
+                    <div class="agent-info">
+                        <div class="agent-name">Vendor Risk Checker</div>
+                        <div class="agent-desc">ตรวจสอบความเสี่ยงของผู้รับจ้างจากประวัติและข้อมูลต่างๆ</div>
+                        <div class="agent-meta">
+                            <span class="agent-meta-item">📊 ความแม่นยำ: 85%</span>
+                            <span class="agent-meta-item">⏱️ เวลาเฉลี่ย: 28 วิ</span>
+                            <span class="agent-meta-item">🚀 ใช้งานแล้ว: 456 ครั้ง</span>
+                        </div>
+                        <div class="agent-tags">
+                            <span class="tag">Vendor</span>
+                            <span class="tag">Risk Assessment</span>
+                            <span class="tag">Due Diligence</span>
+                        </div>
+                    </div>
+                    <div class="agent-actions">
+                        <span class="agent-status status-paused">Paused</span>
+                        <button class="btn btn-primary btn-sm">ดู</button>
+                        <button class="btn btn-secondary btn-sm">แก้ไข</button>
+                        <button class="btn btn-danger btn-sm">ลบ</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Create Agent Modal -->
+    <div class="modal-overlay" id="createModal" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">สร้าง AI Agent ใหม่</div>
+                <button class="close-btn" onclick="closeCreateModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>ชื่อ Agent <span style="color: red;">*</span></label>
+                    <input type="text" placeholder="เช่น Contract Risk Analyzer">
+                </div>
+
+                <div class="form-group">
+                    <label>คำอธิบาย</label>
+                    <textarea rows="3" placeholder="อธิบายหน้าที่และวัตถุประสงค์ของ Agent..."></textarea>
+                </div>
+
+                <div class="form-section">
+                    <h3>การตั้งค่า Model</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Provider</label>
+                            <select>
+                                <option>OpenAI GPT-4</option>
+                                <option>OpenAI GPT-3.5</option>
+                                <option>Ollama Llama3.1</option>
+                                <option>Anthropic Claude</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Model</label>
+                            <select>
+                                <option>gpt-4-turbo</option>
+                                <option>gpt-3.5-turbo</option>
+                                <option>llama3.1:8b</option>
+                                <option>claude-3-opus</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Temperature</label>
+                            <input type="range" min="0" max="2" step="0.1" value="0.7">
+                            <span style="font-size: 12px; color: #718096;">0.7 -
+                                ความสมดุลระหว่างความคิดสร้างสรรค์และความแม่นยำ</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Max Tokens</label>
+                            <input type="number" value="4000">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h3>System Prompt</h3>
+                    <textarea rows="8" placeholder="คุณเป็นผู้เชี่ยวชาญด้าน..."></textarea>
+                </div>
+
+                <div class="form-section">
+                    <h3>Trigger Configuration</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Trigger Events</label>
+                            <select multiple>
+                                <option>document_upload</option>
+                                <option>contract_create</option>
+                                <option>contract_review</option>
+                                <option>contract_approve</option>
+                                <option>vendor_check</option>
+                                <option>manual</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Pages</label>
+                            <select multiple>
+                                <option>contracts</option>
+                                <option>documents</option>
+                                <option>dashboard</option>
+                                <option>agents</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h3>Output Configuration</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Output Action</label>
+                            <select>
+                                <option>show_popup</option>
+                                <option>save_to_field</option>
+                                <option>create_task</option>
+                                <option>send_email</option>
+                                <option>webhook</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Output Format</label>
+                            <select>
+                                <option>json</option>
+                                <option>markdown</option>
+                                <option>text</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCreateModal()">ยกเลิก</button>
+                <button class="btn btn-success">บันทึก Agent</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openCreateModal() {
+            document.getElementById('createModal').style.display = 'flex';
+        }
+
+        function closeCreateModal() {
+            document.getElementById('createModal').style.display = 'none';
+        }
+    </script>
+</body>
+
+</html>

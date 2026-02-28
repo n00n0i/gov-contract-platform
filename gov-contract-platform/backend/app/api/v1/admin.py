@@ -626,7 +626,16 @@ async def clear_all_storage(
         except Exception as e:
             logger.warning(f"Could not delete RAG chunks: {e}")
         
-        # 2. Delete files from MinIO and soft-delete in DB
+        # 2. Delete Contracts GraphRAG data
+        graph_deleted = {"deleted_entities": 0, "deleted_documents": 0, "deleted_relationships": 0}
+        try:
+            from app.services.graph import get_contracts_graph_service
+            graph_service = get_contracts_graph_service()
+            graph_deleted = graph_service.clear_all_data()
+        except Exception as e:
+            logger.warning(f"Could not delete GraphRAG data: {e}")
+        
+        # 3. Delete files from MinIO and soft-delete in DB
         for file in files:
             try:
                 # Delete from MinIO
@@ -652,6 +661,9 @@ async def clear_all_storage(
             "success": True,
             "message": "All storage cleared successfully",
             "deleted_files": deleted_files,
+            "deleted_graph_entities": graph_deleted.get("deleted_entities", 0),
+            "deleted_graph_documents": graph_deleted.get("deleted_documents", 0),
+            "deleted_graph_relationships": graph_deleted.get("deleted_relationships", 0),
             "failed_count": len(failed_files),
             "failed_files": failed_files[:10] if failed_files else [],  # Show first 10
             "warning": "This action cannot be undone. Files have been soft-deleted."

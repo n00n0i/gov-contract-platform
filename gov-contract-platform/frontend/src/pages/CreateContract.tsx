@@ -22,12 +22,8 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Mock data
-const mockVendors = [
-  { id: '1', code: 'V001', name: 'บริษัท เอบีซี จำกัด', tax_id: '1234567890123', type: 'company', address: 'กรุงเทพฯ' },
-  { id: '2', code: 'V002', name: 'ห้างหุ้นส่วน ศิริวัฒน์', tax_id: '9876543210987', type: 'partnership', address: 'เชียงใหม่' },
-  { id: '3', code: 'V003', name: 'บริษัท การ์ดเดี่ยว จำกัด', tax_id: '4567890123456', type: 'company', address: 'กรุงเทพฯ' },
-]
+// Vendors will be fetched from API
+const vendors: any[] = []
 
 // ประเภทสัญญาภาครัฐครบถ้วน (25 ประเภท)
 const contractTypes = [
@@ -264,7 +260,7 @@ export default function CreateContract() {
   const [editContent, setEditContent] = useState('')
   const [aiSuggestion, setAiSuggestion] = useState('')
 
-  const selectedVendor = mockVendors.find(v => v.id === form.vendor_id)
+  const selectedVendor = vendors.find(v => v.id === form.vendor_id)
   const selectedType = contractTypes.find(t => t.value === form.contract_type)
 
   // Auto-generate contract number
@@ -558,11 +554,13 @@ export default function CreateContract() {
                         className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="">ค้นหาผู้รับจ้าง...</option>
-                        {mockVendors.map(v => (
+                        {vendors.length > 0 ? vendors.map(v => (
                           <option key={v.id} value={v.id}>
                             {v.name} ({v.code})
                           </option>
-                        ))}
+                        )) : (
+                          <option value="" disabled>ไม่มีข้อมูลผู้รับจ้าง</option>
+                        )}
                       </select>
                     </div>
                   </div>

@@ -224,6 +224,41 @@ def get_or_create_system_agents(db: Session, user_id: str):
 
 # ============== API Endpoints ==============
 
+# Global agent config - can be overridden via environment variables
+# In production, use database or Redis for persistence
+import os
+
+def get_global_agent_config() -> Dict[str, Any]:
+    """Get global agent configuration from environment or defaults"""
+    return {
+        "auto_execute": os.getenv("AGENT_AUTO_EXECUTE", "false").lower() == "true",
+        "parallel_processing": os.getenv("AGENT_PARALLEL_PROCESSING", "false").lower() == "true",
+        "notification_on_complete": os.getenv("AGENT_NOTIFICATION_ON_COMPLETE", "true").lower() == "true"
+    }
+
+
+@router.get("/config/global")
+def get_global_config(
+    user_id: str = Depends(get_current_user_id)
+):
+    """Get global agent configuration"""
+    return {"success": True, "data": get_global_agent_config()}
+
+
+@router.post("/config/global")
+def save_global_config(
+    config: Dict[str, Any],
+    user_id: str = Depends(get_current_user_id)
+):
+    """Save global agent configuration (note: changes require server restart for persistence)"""
+    # Update environment variables for persistence across restarts
+    for key, value in config.items():
+        if key in ["auto_execute", "parallel_processing", "notification_on_complete"]:
+            os.environ[f"AGENT_{key.upper()}"] = str(value).lower()
+    
+    return {"success": True, "data": get_global_agent_config()}
+
+
 @router.get("")
 def list_agents(
     include_system: bool = True,

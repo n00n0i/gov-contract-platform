@@ -513,15 +513,15 @@ export default function AgentConfigForm({
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <p className="font-medium text-gray-900">{preset.label}</p>
-                    {preset.requires_kb && (
+                    {(preset as any).requires_kb && (
                       <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">ต้องการ KB</span>
                     )}
-                    {preset.requires_graphrag && (
+                    {(preset as any).requires_graphrag && (
                       <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">ต้องการ GraphRAG</span>
                     )}
                   </div>
                   <p className="text-sm text-gray-500">{preset.description}</p>
-                  <p className="text-xs text-gray-400 mt-1">ประเภท: {preset.category}</p>
+                  <p className="text-xs text-gray-400 mt-1">ประเภท: {(preset as any).category}</p>
                 </div>
               </label>
             ))}

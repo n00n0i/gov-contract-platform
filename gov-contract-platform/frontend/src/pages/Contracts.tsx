@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { 
-  Search, Plus, Filter, MoreVertical, FileText, 
+import { useNavigate, useLocation } from 'react-router-dom'
+import {
+  Search, Plus, Filter, MoreVertical, FileText,
   Calendar, DollarSign, Building2, User, AlertCircle,
   CheckCircle, Clock, XCircle, ChevronLeft, ChevronRight,
-  Download, Eye, Edit, Trash2, Paperclip
+  Download, Eye, Edit, Trash2, Paperclip, RefreshCw
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
@@ -81,9 +81,11 @@ const contractTypeColors: Record<string, string> = {
 
 export default function Contracts() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [contracts, setContracts] = useState<Contract[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
+  const [apiSearchQuery, setApiSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -98,227 +100,68 @@ export default function Contracts() {
     expiringSoon: 0,
     totalValue: 0
   })
+  const [statFilter, setStatFilter] = useState<string>('all')
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const initialSearchQuery = params.get('search')
+    if (initialSearchQuery) {
+      setSearchQuery(initialSearchQuery)
+      setApiSearchQuery(initialSearchQuery)
+    }
+  }, [location.search])
 
   useEffect(() => {
     fetchContracts()
     fetchStats()
-  }, [currentPage, statusFilter, searchQuery])
+  }, [currentPage, statusFilter, apiSearchQuery])
 
   const fetchContracts = async () => {
     try {
       setLoading(true)
-      // TODO: Replace with actual API
-      // const response = await api.get('/contracts', {
-      //   params: { page: currentPage, status: statusFilter !== 'all' ? statusFilter : undefined, search: searchQuery }
-      // })
-      // setContracts(response.data.items)
-      // setTotalPages(response.data.pages)
+      const params: any = {
+        page: currentPage,
+        page_size: 20
+      }
+      if (statusFilter !== 'all') {
+        params.status = statusFilter
+      }
+      if (apiSearchQuery) {
+        params.search = apiSearchQuery
+      }
 
-      // Mock data
-      const mockContracts: Contract[] = [
-        {
-          id: 'CON-2024-001',
-          contract_number: '65/2567',
-          title: 'สัญญาก่อสร้างอาคารสำนักงาน',
-          description: 'งานก่อสร้างอาคารสำนักงาน 3 ชั้น พร้อมติดตั้งระบบไฟฟ้าและประปา',
-          contract_type: 'construction',
-          status: 'active',
-          value: 5500000,
-          start_date: '2024-01-15',
-          end_date: '2024-12-31',
-          vendor_name: 'บริษัท ก่อสร้างไทย จำกัด',
-          department_name: 'กองช่าง',
-          document_count: 8,
-          payment_percentage: 45,
-          created_at: '2024-01-10'
-        },
-        {
-          id: 'CON-2024-002',
-          contract_number: '78/2567',
-          title: 'สัญญาจัดซื้อคอมพิวเตอร์',
-          description: 'จัดซื้อคอมพิวเตอร์สำหรับงานราชการ จำนวน 50 เครื่อง',
-          contract_type: 'procurement',
-          status: 'completed',
-          value: 850000,
-          start_date: '2024-02-01',
-          end_date: '2024-06-30',
-          vendor_name: 'บริษัท ไอที โซลูชั่น จำกัด',
-          department_name: 'กองคลัง',
-          document_count: 12,
-          payment_percentage: 100,
-          created_at: '2024-01-25'
-        },
-        {
-          id: 'CON-2024-003',
-          contract_number: '92/2567',
-          title: 'สัญญาบำรุงรักษารถยนต์',
-          description: 'งานบำรุงรักษารถยนต์ราชการ ประจำปี 2567',
-          contract_type: 'service',
-          status: 'active',
-          value: 320000,
-          start_date: '2024-03-01',
-          end_date: '2025-02-28',
-          vendor_name: 'บริษัท ซ่อมรถกลาง จำกัด',
-          department_name: 'กองการเจ้าหน้าที่',
-          document_count: 5,
-          payment_percentage: 25,
-          created_at: '2024-02-20'
-        },
-        {
-          id: 'CON-2024-004',
-          contract_number: '105/2567',
-          title: 'สัญญาจัดซื้อเฟอร์นิเจอร์',
-          description: 'จัดซื้อเฟอร์นิเจอร์สำนักงาน',
-          contract_type: 'procurement',
-          status: 'draft',
-          value: 450000,
-          start_date: '2024-04-01',
-          end_date: '2024-08-31',
-          vendor_name: 'บริษัท เฟอร์นิเจอร์ไทย จำกัด',
-          department_name: 'กองคลัง',
-          document_count: 2,
-          payment_percentage: 0,
-          created_at: '2024-03-15'
-        },
-        {
-          id: 'CON-2023-045',
-          contract_number: '128/2566',
-          title: 'สัญญาก่อสร้างถนน',
-          description: 'งานก่อสร้างถนนคอนกรีตเสริมเหล็ก',
-          contract_type: 'construction',
-          status: 'expired',
-          value: 2800000,
-          start_date: '2023-05-01',
-          end_date: '2024-02-29',
-          vendor_name: 'บริษัท ก่อสร้างถนน จำกัด',
-          department_name: 'กองช่าง',
-          document_count: 15,
-          payment_percentage: 100,
-          created_at: '2023-04-15'
-        },
-        {
-          id: 'CON-2024-005',
-          contract_number: '156/2567',
-          title: 'สัญญาพัฒนาระบบซอฟต์แวร์',
-          description: 'พัฒนาระบบบริหารจัดการสัญญาออนไลน์',
-          contract_type: 'software',
-          status: 'active',
-          value: 3500000,
-          start_date: '2024-05-01',
-          end_date: '2024-12-31',
-          vendor_name: 'บริษัท เทคโนโลยี เอไอ จำกัด',
-          department_name: 'กองเทคโนโลยีสารสนเทศ',
-          document_count: 10,
-          payment_percentage: 30,
-          created_at: '2024-04-20'
-        },
-        {
-          id: 'CON-2024-006',
-          contract_number: '189/2567',
-          title: 'สัญญาเช่าอาคารสำนักงาน',
-          description: 'เช่าอาคารสำนักงาน 5 ชั้น ใจกลางเมือง',
-          contract_type: 'rental',
-          status: 'active',
-          value: 1200000,
-          start_date: '2024-01-01',
-          end_date: '2026-12-31',
-          vendor_name: 'บริษัท อสังหาริมทรัพย์ กรุงเทพฯ',
-          department_name: 'กองการเจ้าหน้าที่',
-          document_count: 8,
-          payment_percentage: 50,
-          created_at: '2023-12-15'
-        },
-        {
-          id: 'CON-2024-007',
-          contract_number: '203/2567',
-          title: 'สัญญาฝึกอบรมบุคลากร',
-          description: 'ฝึกอบรมการใช้ระบบงานใหม่ จำนวน 100 คน',
-          contract_type: 'training',
-          status: 'draft',
-          value: 450000,
-          start_date: '2024-07-01',
-          end_date: '2024-09-30',
-          vendor_name: 'บริษัท เทรนนิ่ง เซ็นเตอร์',
-          department_name: 'กองการเจ้าหน้าที่',
-          document_count: 3,
-          payment_percentage: 0,
-          created_at: '2024-06-10'
-        },
-        {
-          id: 'CON-2024-008',
-          contract_number: '215/2567',
-          title: 'สัญญาซ่อมบำรุงเครื่องปรับอากาศ',
-          description: 'ซ่อมบำรุงระบบแอร์อาคารสำนักงานทั้งหมด',
-          contract_type: 'maintenance',
-          status: 'active',
-          value: 280000,
-          start_date: '2024-03-01',
-          end_date: '2025-02-28',
-          vendor_name: 'บริษัท แอร์เซอร์วิส',
-          department_name: 'กองช่าง',
-          document_count: 6,
-          payment_percentage: 60,
-          created_at: '2024-02-25'
-        },
-        {
-          id: 'CON-2024-009',
-          contract_number: '231/2567',
-          title: 'สัญญาประกันภัยทรัพย์สิน',
-          description: 'ประกันอัคคีภัยและภัยธรรมชาติ',
-          contract_type: 'insurance',
-          status: 'completed',
-          value: 580000,
-          start_date: '2024-01-01',
-          end_date: '2024-12-31',
-          vendor_name: 'บริษัท ประกันภัย ไทย',
-          department_name: 'กองคลัง',
-          document_count: 4,
-          payment_percentage: 100,
-          created_at: '2023-12-20'
-        },
-        {
-          id: 'CON-2024-010',
-          contract_number: '245/2567',
-          title: 'สัญญาวิจัยพัฒนาระบบ AI',
-          description: 'งานวิจัยและพัฒนาระบบ AI วิเคราะห์เอกสาร',
-          contract_type: 'research',
-          status: 'active',
-          value: 8500000,
-          start_date: '2024-06-01',
-          end_date: '2025-12-31',
-          vendor_name: 'สถาบันวิจัยเทคโนโลยี',
-          department_name: 'กองนโยบายและแผน',
-          document_count: 12,
-          payment_percentage: 20,
-          created_at: '2024-05-15'
-        }
-      ]
-      setContracts(mockContracts)
-      setTotalPages(5)
+      const response = await api.get('/contracts', { params })
+      setContracts(response.data.items || [])
+      setTotalPages(response.data.pages || 1)
     } catch (error) {
       console.error('Failed to fetch contracts:', error)
+      setContracts([])
     } finally {
       setLoading(false)
     }
   }
 
   const fetchStats = async () => {
-    // Mock stats
-    setStats({
-      total: 45,
-      active: 12,
-      completed: 28,
-      expiringSoon: 3,
-      totalValue: 45000000
-    })
+    try {
+      const response = await api.get('/contracts/stats/summary')
+      if (response.data && response.data.success) {
+        const data = response.data.data
+        setStats({
+          total: data.total_contracts || 0,
+          active: data.active_contracts || 0,
+          completed: 0, // TODO: Add completed count to API
+          expiringSoon: data.expiring_soon || 0,
+          totalValue: data.total_value || 0
+        })
+      }
+    } catch (error) {
+      console.error('Failed to fetch stats:', error)
+    }
   }
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('th-TH', {
-      style: 'currency',
-      currency: 'THB',
-      minimumFractionDigits: 0
-    }).format(value)
+    if (!value || value === 0) return '0'
+    return new Intl.NumberFormat('th-TH').format(value)
   }
 
   const formatDate = (dateStr: string) => {
@@ -338,9 +181,9 @@ export default function Contracts() {
     if (statusFilter !== 'all' && c.status !== statusFilter) return false
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
-      return c.title.toLowerCase().includes(query) ||
-             c.contract_number.includes(query) ||
-             c.vendor_name?.toLowerCase().includes(query)
+      return (c.title || '').toLowerCase().includes(query) ||
+        (c.contract_number || '').includes(query) ||
+        (c.vendor_name || '').toLowerCase().includes(query)
     }
     return true
   })
@@ -354,7 +197,7 @@ export default function Contracts() {
   }
 
   const toggleSelect = (id: string) => {
-    setSelectedContracts(prev => 
+    setSelectedContracts(prev =>
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     )
   }
@@ -366,46 +209,62 @@ export default function Contracts() {
         subtitle="Contract Management"
         breadcrumbs={[{ label: 'สัญญา' }]}
         actions={(
-          <button
-            onClick={() => navigate('/contracts/new')}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-          >
-            <Plus className="w-5 h-5" />
-            สร้างสัญญาใหม่
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { fetchContracts(); fetchStats(); }}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+            >
+              <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+              รีเฟรชข้อมูล
+            </button>
+            <button
+              onClick={() => navigate('/contracts/new')}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              <Plus className="w-5 h-5" />
+              สร้างสัญญาใหม่
+            </button>
+          </div>
         )}
       />
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <StatCard 
+          <StatCard
             title="สัญญาทั้งหมด"
             value={stats.total}
             subtitle="รายการ"
             icon={<FileText className="w-6 h-6 text-blue-600" />}
             color="blue"
+            isActive={statFilter === 'all'}
+            onClick={() => { setStatFilter('all'); setStatusFilter('all'); }}
           />
-          <StatCard 
+          <StatCard
             title="กำลังดำเนินการ"
             value={stats.active}
             subtitle="สัญญา"
             icon={<CheckCircle className="w-6 h-6 text-green-600" />}
             color="green"
+            isActive={statFilter === 'active'}
+            onClick={() => { setStatFilter('active'); setStatusFilter('active'); }}
           />
-          <StatCard 
+          <StatCard
             title="ใกล้หมดอายุ"
             value={stats.expiringSoon}
             subtitle="สัญญา"
             icon={<AlertCircle className="w-6 h-6 text-orange-600" />}
             color="orange"
+            isActive={statFilter === 'expiring'}
+            onClick={() => { setStatFilter('expiring'); setStatusFilter('expired'); }}
           />
-          <StatCard 
+          <StatCard
             title="มูลค่ารวม"
             value={formatCurrency(stats.totalValue)}
             subtitle="บาท"
-            icon={<DollarSign className="w-6 h-6 text-purple-600" />}
+            icon={<span className="text-xl font-bold text-purple-600">฿</span>}
             color="purple"
+            isActive={false}
           />
         </div>
 
@@ -414,16 +273,19 @@ export default function Contracts() {
           <div className="flex flex-wrap gap-4">
             {/* Search */}
             <div className="flex-1 min-w-[300px]">
-              <div className="relative">
+              <form onSubmit={(e) => {
+                e.preventDefault()
+                setApiSearchQuery(searchQuery)
+              }} className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="ค้นหาสัญญา เลขที่ หรือผู้รับจ้าง..."
+                  placeholder="ค้นหาสัญญา เลขที่ หรือผู้รับจ้าง... (กด Enter เพื่อค้นหา)"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
-              </div>
+              </form>
             </div>
 
             {/* Status Filter */}
@@ -528,9 +390,8 @@ export default function Contracts() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          contractTypeColors[contract.contract_type] || 'bg-gray-100 text-gray-700'
-                        }`}>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${contractTypeColors[contract.contract_type] || 'bg-gray-100 text-gray-700'
+                          }`}>
                           {contractTypeLabels[contract.contract_type] || contract.contract_type}
                         </span>
                       </td>
@@ -568,9 +429,8 @@ export default function Contracts() {
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-2">
                             <div
-                              className={`h-2 rounded-full transition-all ${
-                                contract.payment_percentage === 100 ? 'bg-green-500' : 'bg-blue-500'
-                              }`}
+                              className={`h-2 rounded-full transition-all ${contract.payment_percentage === 100 ? 'bg-green-500' : 'bg-blue-500'
+                                }`}
                               style={{ width: `${contract.payment_percentage}%` }}
                             />
                           </div>
@@ -641,22 +501,31 @@ export default function Contracts() {
   )
 }
 
-function StatCard({ title, value, subtitle, icon, color }: {
+function StatCard({ title, value, subtitle, icon, color, isActive, onClick }: {
   title: string
   value: string | number
   subtitle: string
   icon: React.ReactNode
   color: string
+  isActive?: boolean
+  onClick?: () => void
 }) {
-  const colors: Record<string, string> = {
-    blue: 'bg-blue-50 border-blue-200',
-    green: 'bg-green-50 border-green-200',
-    orange: 'bg-orange-50 border-orange-200',
-    purple: 'bg-purple-50 border-purple-200'
+  const colors: Record<string, { bg: string; border: string; active: string }> = {
+    blue: { bg: 'bg-blue-50', border: 'border-blue-200', active: 'ring-2 ring-blue-500 border-blue-500' },
+    green: { bg: 'bg-green-50', border: 'border-green-200', active: 'ring-2 ring-green-500 border-green-500' },
+    orange: { bg: 'bg-orange-50', border: 'border-orange-200', active: 'ring-2 ring-orange-500 border-orange-500' },
+    purple: { bg: 'bg-purple-50', border: 'border-purple-200', active: 'ring-2 ring-purple-500 border-purple-500' }
   }
 
+  const colorStyle = colors[color]
+  const clickableClass = onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''
+  const activeClass = isActive ? colorStyle.active : ''
+
   return (
-    <div className={`${colors[color]} border rounded-xl p-4`}>
+    <div
+      onClick={onClick}
+      className={`${colorStyle.bg} ${colorStyle.border} border rounded-xl p-4 ${clickableClass} ${activeClass}`}
+    >
       <div className="flex items-center gap-3">
         <div className="p-2 bg-white rounded-lg shadow-sm">
           {icon}

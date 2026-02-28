@@ -99,8 +99,32 @@ class RAGSettings(BaseModel):
     chunkOverlap: int = 50
 
 
+class ContractsGraphRAGSettings(BaseModel):
+    """Settings for Contracts GraphRAG (with security controls)"""
+    enabled: bool = True
+    auto_extract_on_upload: bool = True
+    extract_relationships: bool = True
+    min_confidence: float = 0.7
+    # Security-related settings
+    respect_security_levels: bool = True  # คุมสิทธิ์ตามชั้นความลับ
+    respect_department_hierarchy: bool = True  # คุมสิทธิ์ตามโครงสร้างหน่วยงาน
+
+
+class KBGraphRAGSettings(BaseModel):
+    """Settings for Knowledge Base GraphRAG (agent-only)"""
+    enabled: bool = True
+    auto_extract_on_upload: bool = True  # Extract when KB document uploaded
+    extract_relationships: bool = True
+    min_confidence: float = 0.7
+    # Cross-KB settings
+    enable_cross_kb_links: bool = True  # เปิดเชื่อมโยง entity ข้าม KB
+    shared_entity_threshold: int = 2  # จำนวน entity ที่ต้องมีร่วมกันถึงจะถือว่าเชื่อมโยง
+
+
+# Legacy model for backward compatibility
 class GraphRAGSettings(BaseModel):
-    auto_extract_on_upload: bool = False
+    """Legacy settings (deprecated, use ContractsGraphRAGSettings or KBGraphRAGSettings)"""
+    auto_extract_on_upload: bool = True
     extract_relationships: bool = True
     min_confidence: float = 0.7
 
@@ -700,7 +724,7 @@ def get_graphrag_settings(
     return {
         "success": True,
         "data": prefs.get("graphrag_settings", {
-            "auto_extract_on_upload": False,
+            "auto_extract_on_upload": True,
             "extract_relationships": True,
             "min_confidence": 0.7
         })
@@ -727,4 +751,151 @@ def save_graphrag_settings(
     return {
         "success": True,
         "message": "GraphRAG settings saved"
+    }
+
+
+# ============== New Dual-Domain GraphRAG Settings ==============
+
+@router.get("/graphrag/contracts")
+def get_contracts_graphrag_settings(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Get Contracts GraphRAG settings (with security controls)"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    prefs = user.preferences or {}
+    return {
+        "success": True,
+        "data": prefs.get("contracts_graphrag_settings", {
+            "enabled": True,
+            "auto_extract_on_upload": True,
+            "extract_relationships": True,
+            "min_confidence": 0.7,
+            "respect_security_levels": True,
+            "respect_department_hierarchy": True
+        })
+    }
+
+
+@router.post("/graphrag/contracts")
+def save_contracts_graphrag_settings(
+    settings: ContractsGraphRAGSettings,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Save Contracts GraphRAG settings"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    prefs = user.preferences or {}
+    prefs["contracts_graphrag_settings"] = settings.model_dump()
+    user.preferences = prefs
+    db.commit()
+
+    logger.info(f"Contracts GraphRAG settings updated for user {user_id}")
+    return {
+        "success": True,
+        "message": "Contracts GraphRAG settings saved"
+    }
+
+
+@router.get("/graphrag/kb")
+def get_kb_graphrag_settings(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Get Knowledge Base GraphRAG settings (agent-only)"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    prefs = user.preferences or {}
+    return {
+        "success": True,
+        "data": prefs.get("kb_graphrag_settings", {
+            "enabled": True,
+            "auto_extract_on_upload": True,
+            "extract_relationships": True,
+            "min_confidence": 0.7,
+            "enable_cross_kb_links": True,
+            "shared_entity_threshold": 2
+        })
+    }
+
+
+@router.post("/graphrag/kb")
+def save_kb_graphrag_settings(
+    settings: KBGraphRAGSettings,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Save Knowledge Base GraphRAG settings"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    prefs = user.preferences or {}
+    prefs["kb_graphrag_settings"] = settings.model_dump()
+    user.preferences = prefs
+    db.commit()
+
+    logger.info(f"KB GraphRAG settings updated for user {user_id}")
+    return {
+        "success": True,
+        "message": "KB GraphRAG settings saved"
+    }
+
+
+@router.get("/graphrag/overview")
+def get_graphrag_overview(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Get overview of both GraphRAG domains
+    Returns settings and stats for both Contracts and KB
+    """
+    from app.services.graph import get_contracts_graph_service, get_kb_graph_service
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    prefs = user.preferences or {}
+    
+    # Get graph stats
+    try:
+        contracts_stats = get_contracts_graph_service().get_stats()
+        kb_stats = get_kb_graph_service().get_stats()
+    except Exception as e:
+        logger.error(f"Failed to get graph stats: {e}")
+        contracts_stats = {"total_entities": 0, "total_relationships": 0}
+        kb_stats = {"total_entities": 0, "total_relationships": 0}
+
+    return {
+        "success": True,
+        "data": {
+            "contracts": {
+                "settings": prefs.get("contracts_graphrag_settings", {
+                    "enabled": True,
+                    "auto_extract_on_upload": True,
+                    "extract_relationships": True,
+                    "min_confidence": 0.7
+                }),
+                "stats": contracts_stats
+            },
+            "knowledge_base": {
+                "settings": prefs.get("kb_graphrag_settings", {
+                    "enabled": True,
+                    "auto_extract_on_upload": True,
+                    "extract_relationships": True,
+                    "min_confidence": 0.7
+                }),
+                "stats": kb_stats
+            }
+        }
     }

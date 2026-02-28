@@ -21,58 +21,26 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Mock data for reports
-const mockStats = {
-  totalContracts: 156,
-  totalValue: 1250000000,
-  activeContracts: 89,
-  completedContracts: 45,
-  expiredContracts: 22,
-  avgContractValue: 8012820,
-  contractsThisMonth: 12,
-  contractsGrowth: 15.5,
-  valueGrowth: 23.8
+// Data will be fetched from API
+const stats = {
+  totalContracts: 0,
+  totalValue: 0,
+  activeContracts: 0,
+  completedContracts: 0,
+  expiredContracts: 0,
+  avgContractValue: 0,
+  contractsThisMonth: 0,
+  contractsGrowth: 0,
+  valueGrowth: 0
 }
 
-const mockMonthlyData = [
-  { month: 'ม.ค.', contracts: 8, value: 45000000 },
-  { month: 'ก.พ.', contracts: 12, value: 78000000 },
-  { month: 'มี.ค.', contracts: 15, value: 95000000 },
-  { month: 'เม.ย.', contracts: 10, value: 62000000 },
-  { month: 'พ.ค.', contracts: 18, value: 120000000 },
-  { month: 'มิ.ย.', contracts: 14, value: 89000000 },
-  { month: 'ก.ค.', contracts: 16, value: 105000000 },
-  { month: 'ส.ค.', contracts: 20, value: 145000000 },
-  { month: 'ก.ย.', contracts: 22, value: 168000000 },
-  { month: 'ต.ค.', contracts: 19, value: 142000000 },
-  { month: 'พ.ย.', contracts: 15, value: 98000000 },
-  { month: 'ธ.ค.', contracts: 7, value: 56000000 },
-]
+const monthlyData: any[] = []
 
-const mockDepartmentData = [
-  { name: 'กรมการค้าต่างประเทศ', contracts: 28, value: 320000000, color: 'bg-blue-500' },
-  { name: 'กรมบัญชีกลาง', contracts: 35, value: 280000000, color: 'bg-green-500' },
-  { name: 'กรมสรรพากร', contracts: 22, value: 195000000, color: 'bg-purple-500' },
-  { name: 'กรมศุลกากร', contracts: 18, value: 165000000, color: 'bg-orange-500' },
-  { name: 'กรมโยธาธิการ', contracts: 15, value: 125000000, color: 'bg-pink-500' },
-  { name: 'อื่นๆ', contracts: 38, value: 165000000, color: 'bg-gray-400' },
-]
+const departmentData: any[] = []
 
-const mockVendorData = [
-  { name: 'บริษัท เอบีซี จำกัด', contracts: 12, value: 185000000, status: 'active' },
-  { name: 'ห้างหุ้นส่วน ศิริวัฒน์', contracts: 8, value: 142000000, status: 'active' },
-  { name: 'บริษัท การ์ดเดี่ยว จำกัด', contracts: 15, value: 98000000, status: 'active' },
-  { name: 'บริษัท โตโยต้า มอเตอร์', contracts: 6, value: 89000000, status: 'active' },
-  { name: 'บริษัท ไทย คอนสตรัคชั่น', contracts: 9, value: 76000000, status: 'warning' },
-]
+const vendorData: any[] = []
 
-const mockExpiringContracts = [
-  { id: 1, number: 'CNT-2024-015', title: 'จัดจ้างเหมาก่อสร้าง', daysLeft: 3, value: 8500000 },
-  { id: 2, number: 'CNT-2024-023', title: 'จัดซื้ออุปกรณ์สำนักงาน', daysLeft: 12, value: 1250000 },
-  { id: 3, number: 'CNT-2024-031', title: 'บริการรักษาความปลอดภัย', daysLeft: 18, value: 3200000 },
-  { id: 4, number: 'CNT-2024-042', title: 'จัดทำซอฟต์แวร์', daysLeft: 25, value: 4500000 },
-  { id: 5, number: 'CNT-2024-055', title: 'บริการทำความสะอาด', daysLeft: 28, value: 890000 },
-]
+const expiringContracts: any[] = []
 
 export default function Reports() {
   const navigate = useNavigate()
@@ -201,27 +169,27 @@ export default function Reports() {
               <MetricCard
                 icon={<FileText className="w-6 h-6 text-blue-600" />}
                 title="สัญญาทั้งหมด"
-                value={formatNumber(mockStats.totalContracts)}
-                change={`+${mockStats.contractsGrowth}%`}
+                value={formatNumber(stats.totalContracts)}
+                change={`+${stats.contractsGrowth}%`}
                 changeType="positive"
               />
               <MetricCard
                 icon={<DollarSign className="w-6 h-6 text-green-600" />}
                 title="มูลค่ารวม"
-                value={formatCurrency(mockStats.totalValue)}
-                change={`+${mockStats.valueGrowth}%`}
+                value={formatCurrency(stats.totalValue)}
+                change={`+${stats.valueGrowth}%`}
                 changeType="positive"
               />
               <MetricCard
                 icon={<CheckCircle className="w-6 h-6 text-purple-600" />}
                 title="สัญญาที่ใช้งาน"
-                value={formatNumber(mockStats.activeContracts)}
-                subtitle={`จาก ${mockStats.totalContracts} สัญญา`}
+                value={formatNumber(stats.activeContracts)}
+                subtitle={`จาก ${stats.totalContracts} สัญญา`}
               />
               <MetricCard
                 icon={<Clock className="w-6 h-6 text-orange-600" />}
                 title="สัญญาใหม่เดือนนี้"
-                value={formatNumber(mockStats.contractsThisMonth)}
+                value={formatNumber(stats.contractsThisMonth)}
                 change="+3 จากเดือนที่แล้ว"
                 changeType="positive"
               />
@@ -235,7 +203,7 @@ export default function Reports() {
                   <BarChart3 className="w-5 h-5 text-gray-400" />
                 </div>
                 <div className="h-64 flex items-end justify-between gap-2">
-                  {mockMonthlyData.map((data, idx) => (
+                  {monthlyData.length > 0 ? monthlyData.map((data, idx) => (
                     <div key={idx} className="flex-1 flex flex-col items-center gap-2">
                       <div 
                         className="w-full bg-blue-500 rounded-t hover:bg-blue-600 transition cursor-pointer relative group"
@@ -247,7 +215,11 @@ export default function Reports() {
                       </div>
                       <span className="text-xs text-gray-500">{data.month}</span>
                     </div>
-                  ))}
+                  )) : (
+                    <div className="flex items-center justify-center h-full text-gray-400">
+                      <p>ไม่มีข้อมูล</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -258,7 +230,7 @@ export default function Reports() {
                   <PieChart className="w-5 h-5 text-gray-400" />
                 </div>
                 <div className="space-y-4">
-                  {mockDepartmentData.map((dept, idx) => (
+                  {departmentData.length > 0 ? departmentData.map((dept, idx) => (
                     <div key={idx}>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm text-gray-700">{dept.name}</span>
@@ -273,7 +245,11 @@ export default function Reports() {
                         ></div>
                       </div>
                     </div>
-                  ))}
+                  )) : (
+                    <div className="text-center text-gray-400 py-8">
+                      <p>ไม่มีข้อมูล</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -299,7 +275,7 @@ export default function Reports() {
                     </tr>
                   </thead>
                   <tbody>
-                    {mockExpiringContracts.map((contract) => (
+                    {expiringContracts.length > 0 ? expiringContracts.map((contract) => (
                       <tr key={contract.id} className="border-b hover:bg-gray-50">
                         <td className="py-3 px-4 text-sm text-gray-900">{contract.number}</td>
                         <td className="py-3 px-4 text-sm text-gray-700">{contract.title}</td>
@@ -319,7 +295,7 @@ export default function Reports() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    )) : null}
                   </tbody>
                 </table>
               </div>
@@ -411,7 +387,7 @@ export default function Reports() {
             <div className="bg-white rounded-xl shadow-sm border p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-6">ผู้รับจ้าง TOP 5</h3>
               <div className="space-y-4">
-                {mockVendorData.map((vendor, idx) => (
+                {vendorData.length > 0 ? vendorData.map((vendor, idx) => (
                   <div key={idx} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
                     <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
                       {idx + 1}
@@ -429,7 +405,11 @@ export default function Reports() {
                       </span>
                     </div>
                   </div>
-                ))}
+                )) : (
+                  <div className="text-center text-gray-400 py-8">
+                    <p>ไม่มีข้อมูลผู้รับจ้าง</p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -488,7 +468,7 @@ export default function Reports() {
             <div className="bg-white rounded-xl shadow-sm border p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">การจ่ายเงินรายเดือน</h3>
               <div className="h-64 flex items-end justify-between gap-2">
-                {mockMonthlyData.map((data, idx) => (
+                {monthlyData.length > 0 ? monthlyData.map((data, idx) => (
                   <div key={idx} className="flex-1 flex flex-col items-center gap-2">
                     <div 
                       className="w-full bg-green-500 rounded-t hover:bg-green-600 transition cursor-pointer relative group"
@@ -500,7 +480,11 @@ export default function Reports() {
                     </div>
                     <span className="text-xs text-gray-500">{data.month}</span>
                   </div>
-                ))}
+                )) : (
+                  <div className="flex items-center justify-center h-full text-gray-400 w-full">
+                    <p>ไม่มีข้อมูล</p>
+                  </div>
+                )}
               </div>
             </div>
 

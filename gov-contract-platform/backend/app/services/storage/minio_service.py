@@ -126,17 +126,33 @@ class MinIOService:
         Default expires: 7 days (604800 seconds) - same as JWT token
         Max allowed by MinIO: 7 days
         
-        Uses public_client if configured for browser-accessible links.
+        Uses internal client (minio:9000) to generate URL, then replaces
+        host with public URL (localhost:9000) for browser access.
         """
         try:
-            # Use public client if available, otherwise use internal client
-            client = self.public_client if self.public_client else self.client
-            
-            url = client.presigned_get_object(
+            # Always use internal client to generate presigned URL
+            # (public_client can't connect from inside container)
+            url = self.client.presigned_get_object(
                 bucket_name=self.bucket,
                 object_name=object_name,
                 expires=timedelta(seconds=expires)
             )
+            
+            # Replace internal endpoint with public URL for browser access
+            if settings.MINIO_PUBLIC_URL and settings.MINIO_PUBLIC_URL != settings.MINIO_ENDPOINT:
+                # Parse the generated URL and replace the host
+                from urllib.parse import urlparse, urlunparse
+                parsed = urlparse(url)
+                public_parsed = urlparse(settings.MINIO_PUBLIC_URL)
+                
+                # Replace netloc (host:port) with public endpoint
+                new_url = urlunparse(
+                    parsed._replace(
+                        netloc=public_parsed.netloc,
+                        scheme=public_parsed.scheme
+                    )
+                )
+                return new_url
             
             return url
         except S3Error as e:

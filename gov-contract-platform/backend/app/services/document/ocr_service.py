@@ -188,15 +188,125 @@ class OCRService:
     
     def _extract_contract_data(self, text: str) -> Dict[str, Any]:
         """Extract structured data from contract text"""
+        parties = self._extract_parties(text)
+        counterparty = self._extract_counterparty(text, parties)
+        start_date = self._extract_start_date(text)
+        end_date = self._extract_end_date(text)
+        
         data = {
             "contract_number": self._extract_contract_number(text),
+            "counterparty": counterparty,
+            "contract_type": self._extract_contract_type(text),
             "contract_value": self._extract_contract_value(text),
-            "start_date": self._extract_start_date(text),
-            "end_date": self._extract_end_date(text),
-            "parties": self._extract_parties(text),
             "project_name": self._extract_project_name(text),
+            "start_date": start_date,
+            "end_date": end_date,
+            "duration_months": self._calculate_duration_months(start_date, end_date),
+            "parties": parties,
         }
         return data
+    
+    def _extract_counterparty(self, text: str, parties: List[Dict[str, str]]) -> Optional[str]:
+        """Extract counterparty name (the other party, not government)"""
+        # First check parties list for contractor type
+        for party in parties:
+            if party.get("type") == "contractor":
+                return party.get("name")
+        
+        # Look for company patterns
+        company_patterns = [
+            r"บริษัท\s*([\u0E01-\u0E5BA-Za-z0-9\s\.\-]+)\s*(จำกัด|มหาชน|Limited)",
+            r"ห้างหุ้นส่วน\s*([\u0E01-\u0E5BA-Za-z0-9\s\.\-]+)",
+            r"ผู้รับจ้าง\s*[:\s]*([\u0E01-\u0E5BA-Za-z0-9\s\.\-]+)(?:\n|และ|กับ)",
+        ]
+        for pattern in company_patterns:
+            match = re.search(pattern, text)
+            if match:
+                name = match.group(1).strip()
+                # Clean up common suffixes
+                name = re.sub(r'\s+(จำกัด|มหาชน|Limited|Ltd\.?).*$', '', name, flags=re.IGNORECASE)
+                return name
+        return None
+    
+    def _extract_contract_type(self, text: str) -> Optional[str]:
+        """Extract contract type/category"""
+        type_patterns = [
+            (r"จ้างเหมา|เหมา\s*([ก-์]+)|งานเหมา", "เหมาก่อสร้าง"),
+            (r"จัดซื้อ|ซื้อ\s*([ก-์]+)| procurement", "จัดซื้อ"),
+            (r"จัดจ้าง|บริการ|service|maintenance", "จัดจ้างบริการ"),
+            (r"เช่า|rental|lease", "เช่า"),
+            (r"ประกัน|insurance", "ประกันภัย"),
+            (r"ก่อสร้าง|construction|build", "ก่อสร้าง"),
+            (r"ซ่อมแซม|ซ่อมบำรุง|repair|maintenance", "ซ่อมบำรุง"),
+            (r"จัดหา|furnish|supply", "จัดหาอุปกรณ์"),
+            (r"พัฒนา|พัฒนาระบบ|develop|software", "พัฒนาระบบ"),
+            (r"วิจัย|research|R&D", "วิจัยและพัฒนา"),
+            (r"ฝึกอบรม|training|สัมมนา", "ฝึกอบรม"),
+            (r"ให้บริการ|บริการ", "จัดจ้างบริการ"),
+        ]
+        
+        # Check in first 2000 characters (usually header area)
+        header_text = text[:2000].lower()
+        for pattern, contract_type in type_patterns:
+            if re.search(pattern, header_text, re.IGNORECASE):
+                return contract_type
+        
+        # Check full text if not found in header
+        for pattern, contract_type in type_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return contract_type
+        
+        return None
+    
+    def _calculate_duration_months(self, start_date: Optional[str], end_date: Optional[str]) -> Optional[int]:
+        """Calculate contract duration in months"""
+        if not start_date or not end_date:
+            return None
+        
+        try:
+            # Try to parse Thai date format
+            thai_months = {
+                'มกราคม': 1, 'กุมภาพันธ์': 2, 'มีนาคม': 3, 'เมษายน': 4,
+                'พฤษภาคม': 5, 'มิถุนายน': 6, 'กรกฎาคม': 7, 'สิงหาคม': 8,
+                'กันยายน': 9, 'ตุลาคม': 10, 'พฤศจิกายน': 11, 'ธันวาคม': 12,
+                'ม\.ค\.': 1, 'ก\.พ\.': 2, 'มี\.ค\.': 3, 'เม\.ย\.': 4,
+                'พ\.ค\.': 5, 'มิ\.ย\.': 6, 'ก\.ค\.': 7, 'ส\.ค\.': 8,
+                'ก\.ย\.': 9, 'ต\.ค\.': 10, 'พ\.ย\.': 11, 'ธ\.ค\.': 12,
+            }
+            
+            # Try DD/MM/YYYY format
+            for date_str in [start_date, end_date]:
+                if '/' in date_str:
+                    parts = date_str.split('/')
+                    if len(parts) == 3:
+                        day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+                        if year < 2500:
+                            year += 543
+                        if date_str == start_date:
+                            start_dt = datetime(year, month, day)
+                        else:
+                            end_dt = datetime(year, month, day)
+                else:
+                    # Try Thai format
+                    for thai_month, num in thai_months.items():
+                        if thai_month in date_str:
+                            match = re.search(r'(\d{1,2})\s*' + re.escape(thai_month) + r'\s*(\d{4})', date_str)
+                            if match:
+                                day = int(match.group(1))
+                                year = int(match.group(2))
+                                if year < 2500:
+                                    year += 543
+                                if date_str == start_date:
+                                    start_dt = datetime(year, num, day)
+                                else:
+                                    end_dt = datetime(year, num, day)
+                                break
+            
+            # Calculate months difference
+            months = (end_dt.year - start_dt.year) * 12 + (end_dt.month - start_dt.month)
+            return max(1, months)  # Minimum 1 month
+        except:
+            return None
     
     def _extract_contract_number(self, text: str) -> Optional[str]:
         """Extract contract number"""
