@@ -143,6 +143,8 @@ from app.api.v1 import access_control as access_router
 from app.api.v1 import notifications as notifications_router
 from app.api.v1 import notification_recipients as recipients_router
 from app.api.v1 import admin as admin_router
+from app.api.v1 import chat as chat_router
+from app.api.v1 import knowledge_base as kb_router
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(identity.router, prefix="/api/v1/identity")
@@ -160,6 +162,8 @@ app.include_router(recipients_router.router, prefix="/api/v1")
 app.include_router(access_router.router, prefix="/api/v1")
 app.include_router(vendors.router, prefix="/api/v1")
 app.include_router(admin_router.router, prefix="/api/v1")
+app.include_router(chat_router.router, prefix="/api/v1")
+app.include_router(kb_router.router, prefix="/api/v1")
 
 
 if __name__ == "__main__":

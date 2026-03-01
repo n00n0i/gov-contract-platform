@@ -49,6 +49,7 @@ class TemplateCreate(BaseModel):
     type: str
     description: Optional[str] = ""
     clauses_data: List[Dict[str, Any]] = []
+    variables: List[Dict[str, Any]] = []
 
 
 class TemplateUpdate(BaseModel):
@@ -56,6 +57,7 @@ class TemplateUpdate(BaseModel):
     type: Optional[str] = None
     description: Optional[str] = None
     clauses_data: Optional[List[Dict[str, Any]]] = None
+    variables: Optional[List[Dict[str, Any]]] = None
     isDefault: Optional[bool] = None
 
 
@@ -351,29 +353,32 @@ def create_template(
     db.execute(text("""
         INSERT INTO contract_templates
             (id, name, type, description, clauses_count, is_default, is_system,
-             created_by, updated_by, created_at, updated_at, is_deleted)
+             variables, created_by, updated_by, created_at, updated_at, is_deleted)
         VALUES
             (:id, :name, :type, :description, :clauses_count, false, false,
-             :created_by, :created_by, :now, :now, 0)
+             :variables, :created_by, :created_by, :now, :now, 0)
     """), {
         "id": tpl_id, "name": template.name, "type": template.type,
         "description": template.description or "",
         "clauses_count": len(template.clauses_data),
+        "variables": json.dumps(template.variables, ensure_ascii=False),
         "created_by": user_id, "now": now
     })
     for i, clause in enumerate(template.clauses_data):
+        content_val = clause.get("content", "")
         db.execute(text("""
             INSERT INTO contract_template_clauses
-                (id, template_id, clause_number, title, content, sort_order,
+                (id, template_id, clause_number, title, content, content_template, sort_order,
                  created_by, updated_by, created_at, updated_at, is_deleted)
             VALUES
-                (:id, :template_id, :num, :title, :content, :sort,
+                (:id, :template_id, :num, :title, :content, :content_template, :sort,
                  :user_id, :user_id, :now, :now, 0)
         """), {
             "id": str(uuid.uuid4()), "template_id": tpl_id,
             "num": clause.get("number", i + 1),
             "title": clause.get("title", ""),
-            "content": clause.get("content", ""),
+            "content": content_val,
+            "content_template": content_val,
             "sort": i, "user_id": user_id, "now": now
         })
     db.commit()
@@ -407,6 +412,8 @@ def update_template(
         sets.append("description = :desc"); params["desc"] = update.description
     if update.isDefault is not None:
         sets.append("is_default = :is_default"); params["is_default"] = update.isDefault
+    if update.variables is not None:
+        sets.append("variables = :vars"); params["vars"] = json.dumps(update.variables, ensure_ascii=False)
     if update.clauses_data is not None:
         sets.append("clauses_count = :cc"); params["cc"] = len(update.clauses_data)
         # Replace clauses
@@ -542,6 +549,7 @@ def list_template_types(
 class SmartImportRequest(BaseModel):
     raw_text: str
     save: bool = True  # save to DB after extraction
+    extra_prompt: Optional[str] = None  # user-defined instructions for LLM
 
 
 class DraftContractRequest(BaseModel):
@@ -599,6 +607,43 @@ async def _call_llm_for_template(db, user_id: str, prompt: str) -> str:
             return resp.json()["choices"][0]["message"]["content"]
 
 
+@router.post("/extract-text")
+async def extract_text_from_file(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Extract raw text from PDF, DOCX, or TXT file for use with smart import."""
+    filename = file.filename or ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if ext not in ("pdf", "docx", "txt", "md"):
+        raise HTTPException(status_code=400, detail="รองรับเฉพาะ .pdf, .docx, .txt, .md")
+
+    content = await file.read()
+
+    try:
+        if ext == "pdf":
+            import io
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                pages_text = [page.extract_text() or "" for page in pdf.pages]
+            raw_text = "\n".join(pages_text).strip()
+        elif ext == "docx":
+            import io
+            import docx
+            doc = docx.Document(io.BytesIO(content))
+            raw_text = "\n".join(p.text for p in doc.paragraphs).strip()
+        else:  # txt, md
+            raw_text = content.decode("utf-8", errors="replace").strip()
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"ไม่สามารถอ่านไฟล์ได้: {e}")
+
+    if not raw_text:
+        raise HTTPException(status_code=422, detail="ไม่พบข้อความในไฟล์")
+
+    return {"success": True, "raw_text": raw_text, "char_count": len(raw_text)}
+
+
 @router.post("/import-smart")
 async def smart_import_template(
     request: SmartImportRequest,
@@ -612,7 +657,8 @@ async def smart_import_template(
     if len(request.raw_text.strip()) < 100:
         raise HTTPException(status_code=400, detail="ข้อความสัญญาสั้นเกินไป")
 
-    full_prompt = SMART_IMPORT_PROMPT + request.raw_text[:12000]
+    extra = f"\n\nคำสั่งเพิ่มเติมจากผู้ใช้:\n{request.extra_prompt.strip()}\n" if request.extra_prompt and request.extra_prompt.strip() else ""
+    full_prompt = SMART_IMPORT_PROMPT + extra + request.raw_text[:12000]
 
     try:
         ai_text = await _call_llm_for_template(db, user_id, full_prompt)

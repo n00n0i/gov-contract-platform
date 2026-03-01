@@ -62,7 +62,7 @@ gov-contract-platform/
 │   ├── 📄 main.py           # Application Entry
 │   └── 📄 requirements.txt
 │
-├── 📁 frontend/             # React Frontend (Coming soon)
+├── 📁 frontend/             # React + TypeScript Frontend
 │
 ├── 📁 infra/                # Infrastructure
 │   ├── 📄 docker-compose.yml
@@ -117,11 +117,13 @@ gov-contract-platform/
 - ✅ **Advanced Search** - Full-text + Vector Search (Elasticsearch)
 - ✅ **Role-Based Access** - RBAC ระดับหน่วยงาน/กอง/งาน
 - ✅ **Workflow Engine** - อนุมัติ, แจ้งเตือน, Escalation
-- ✅ **Vendor Management** - ทะเบียนผู้รับจ้าง, ประเมินผล
-- ✅ **Analytics Dashboard** - รายงาน, สถิติ, วิเคราะห์
+- ✅ **Vendor Management** - ทะเบียนผู้รับจ้าง, ประเมินผล, ค้นหาพร้อม debounce, Toast notifications
+- ✅ **Analytics Dashboard** - รายงาน, สถิติ real-time จากฐานข้อมูล (12-month trend, expiring contracts, top vendors)
+- ✅ **Template Management** - Smart Import, Variables/fill-in-blank, AI extraction from documents
+- ✅ **AI Agents** - GraphRAG-powered Legal Agent & Finance Agent
+- ✅ **React Frontend** - TypeScript, multi-step document upload wizard, Settings, Reports, Vendors pages
 
 ### Coming Soon
-- 🤖 **AI Agents** - Legal Agent & Finance Agent
 - 📱 **Mobile App** - iOS & Android
 - 🔗 **Integrations** - e-GP, ThaiID, e-Signature
 - 📊 **Advanced Analytics** - ML-based Risk Prediction
@@ -135,7 +137,7 @@ gov-contract-platform/
 # Login
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "password"}'
+  -d '{"username": "admin", "password": "admin123"}'
 ```
 
 ### Contract Management
@@ -148,17 +150,63 @@ curl -X POST http://localhost:8000/api/v1/contracts \
     "title": "สัญญาจ้างก่อสร้าง",
     "contract_type": "construction",
     "value": 5000000,
-    "department_id": "DEPT001"
+    "department_id": "DEPT001",
+    "status": "draft"
   }'
 
 # Search Contracts
 curl "http://localhost:8000/api/v1/contracts/search?q=ก่อสร้าง&type=construction"
 
-# Upload Document
-curl -X POST http://localhost:8000/api/v1/contracts/{id}/documents \
+# Upload Document (OCR preview - no DB save)
+curl -X POST http://localhost:8000/api/v1/documents/ocr-preview \
   -H "Authorization: Bearer $TOKEN" \
-  -F "file=@contract.pdf" \
-  -F "type=main_contract"
+  -F "file=@contract.pdf"
+
+# Confirm document upload (saves to DB, queues RAG + GraphRAG)
+curl -X POST http://localhost:8000/api/v1/documents/confirm \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"storage_path": "<temp_path_from_preview>", "contract_id": 1}'
+```
+
+### Analytics
+```bash
+# Contract statistics summary
+curl http://localhost:8000/api/v1/contracts/stats/summary \
+  -H "Authorization: Bearer $TOKEN"
+
+# Full report: monthly breakdown, type distribution, expiring contracts, top vendors
+curl http://localhost:8000/api/v1/contracts/stats/report \
+  -H "Authorization: Bearer $TOKEN"
+
+# Vendor statistics summary
+curl http://localhost:8000/api/v1/vendors/stats/summary \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Template Management
+```bash
+# Smart Import from file (PDF, DOCX, TXT, MD)
+curl -X POST http://localhost:8000/api/v1/templates/extract-text \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@template.pdf"
+
+# Smart Import with extra LLM prompt
+curl -X POST http://localhost:8000/api/v1/templates/import-smart \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"raw_text": "...", "extra_prompt": "ให้เน้นข้อกำหนดเรื่องค่าปรับ"}'
+
+# Create Template with variables
+curl -X POST http://localhost:8000/api/v1/templates \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "สัญญาจ้างก่อสร้าง",
+    "variables": [
+      {"key": "project_name", "label": "ชื่อโครงการ", "type": "text", "default": ""}
+    ]
+  }'
 ```
 
 ---

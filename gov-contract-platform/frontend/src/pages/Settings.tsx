@@ -10,7 +10,7 @@ import {
   Settings2, Workflow, Cpu, MessagesSquare, Key, Settings as SettingsIcon, Clock,
   BookOpen, X, Users, UserPlus, UserCog, Building2, ChevronRight, ChevronDown, FolderTree, Zap,
   HardDrive, FileArchive, BrainCircuit, DatabaseBackup, Layers,
-  Loader2
+  Loader2, Upload, MessageSquare
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
@@ -29,7 +29,7 @@ import {
 } from '../services/settingsService'
 import {
   getTemplates, getTemplate, createTemplate, updateTemplate, deleteTemplate,
-  setDefaultTemplate, getTemplateTypes, smartImportTemplate, draftContract,
+  setDefaultTemplate, getTemplateTypes, smartImportTemplate, extractTextFromFile, draftContract,
   type Template
 } from '../services/templateService'
 import {
@@ -1075,6 +1075,10 @@ export default function Settings() {
   const [showSmartImport, setShowSmartImport] = useState(false)
   const [smartImportText, setSmartImportText] = useState('')
   const [smartImportLoading, setSmartImportLoading] = useState(false)
+  const [smartImportMode, setSmartImportMode] = useState<'text' | 'file'>('text')
+  const [smartImportPrompt, setSmartImportPrompt] = useState('')
+  const [smartImportFile, setSmartImportFile] = useState<File | null>(null)
+  const [smartImportFileLoading, setSmartImportFileLoading] = useState(false)
 
   // Draft Contract Modal
   const [showDraftModal, setShowDraftModal] = useState(false)
@@ -1343,17 +1347,35 @@ export default function Settings() {
     if (!smartImportText.trim()) return
     setSmartImportLoading(true)
     try {
-      const res = await smartImportTemplate(smartImportText.trim())
+      const res = await smartImportTemplate(smartImportText.trim(), true, smartImportPrompt || undefined)
       if (res.success) {
         setMessage({ type: 'success', text: res.message || 'นำเข้า Template สำเร็จ' })
         setShowSmartImport(false)
         setSmartImportText('')
+        setSmartImportPrompt('')
+        setSmartImportFile(null)
+        setSmartImportMode('text')
         fetchTemplates()
       }
     } catch (err: any) {
       setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถนำเข้าได้' })
     } finally {
       setSmartImportLoading(false)
+    }
+  }
+
+  const handleSmartImportFileChange = async (file: File | null) => {
+    if (!file) { setSmartImportFile(null); return }
+    setSmartImportFile(file)
+    setSmartImportFileLoading(true)
+    try {
+      const res = await extractTextFromFile(file)
+      setSmartImportText(res.raw_text)
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถอ่านไฟล์ได้' })
+      setSmartImportFile(null)
+    } finally {
+      setSmartImportFileLoading(false)
     }
   }
 
@@ -5459,35 +5481,98 @@ export default function Settings() {
                   <Sparkles className="w-6 h-6 text-purple-600" />
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900">นำเข้าสัญญา (Smart Import)</h2>
-                    <p className="text-sm text-gray-500">วาง/พิมพ์ข้อความสัญญาแล้ว AI จะสร้าง Template อัตโนมัติ</p>
+                    <p className="text-sm text-gray-500">AI วิเคราะห์สัญญาและสร้าง Template อัตโนมัติ</p>
                   </div>
                 </div>
-                <button onClick={() => setShowSmartImport(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                <button onClick={() => { setShowSmartImport(false); setSmartImportMode('text'); setSmartImportText(''); setSmartImportPrompt(''); setSmartImportFile(null) }} className="p-2 hover:bg-gray-100 rounded-lg">
                   <X className="w-5 h-5 text-gray-500" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-6">
-                <textarea
-                  value={smartImportText}
-                  onChange={(e) => setSmartImportText(e.target.value)}
-                  placeholder="วางข้อความสัญญาที่นี่... เช่น สัญญาจ้างก่อสร้าง, สัญญาจัดซื้อ ฯลฯ&#10;&#10;AI จะวิเคราะห์และสร้าง Template โดยอัตโนมัติ รวมถึง:&#10;• ตัวแปร (เช่น ชื่อคู่สัญญา, มูลค่าสัญญา, วันที่)&#10;• ข้อสัญญาทางเลือก (ก/ข)&#10;• ข้อสัญญาที่ไม่บังคับ"
-                  rows={14}
-                  className="w-full border rounded-lg p-3 text-sm font-mono resize-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                />
-                <p className="text-xs text-gray-400 mt-2">
-                  ขนาดที่รองรับ: ข้อความสัญญาที่มีความยาวไม่เกิน ~20,000 ตัวอักษร
-                </p>
+
+              {/* Mode tabs */}
+              <div className="flex gap-1 px-6 pt-4">
+                <button
+                  onClick={() => setSmartImportMode('text')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${smartImportMode === 'text' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                >
+                  <FileText className="w-4 h-4" /> วางเนื้อหา
+                </button>
+                <button
+                  onClick={() => setSmartImportMode('file')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${smartImportMode === 'file' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                >
+                  <Upload className="w-4 h-4" /> แนบไฟล์
+                </button>
               </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                {/* File upload area */}
+                {smartImportMode === 'file' && (
+                  <div>
+                    <label
+                      className={`flex flex-col items-center justify-center w-full h-36 border-2 border-dashed rounded-xl cursor-pointer transition ${smartImportFile ? 'border-purple-400 bg-purple-50' : 'border-gray-300 hover:border-purple-400 hover:bg-purple-50'}`}
+                    >
+                      <input
+                        type="file"
+                        accept=".pdf,.docx,.txt,.md"
+                        className="hidden"
+                        onChange={(e) => handleSmartImportFileChange(e.target.files?.[0] ?? null)}
+                        disabled={smartImportFileLoading}
+                      />
+                      {smartImportFileLoading ? (
+                        <><Loader2 className="w-8 h-8 text-purple-400 animate-spin mb-2" /><span className="text-sm text-purple-600">กำลังอ่านไฟล์...</span></>
+                      ) : smartImportFile ? (
+                        <><FileText className="w-8 h-8 text-purple-500 mb-2" /><span className="text-sm font-medium text-purple-700">{smartImportFile.name}</span><span className="text-xs text-gray-400 mt-1">{smartImportText ? `${smartImportText.length.toLocaleString()} ตัวอักษร` : ''}</span></>
+                      ) : (
+                        <><Upload className="w-8 h-8 text-gray-400 mb-2" /><span className="text-sm text-gray-500">คลิกเพื่อเลือกไฟล์ หรือลากมาวางที่นี่</span><span className="text-xs text-gray-400 mt-1">รองรับ PDF, DOCX, TXT, MD</span></>
+                      )}
+                    </label>
+                  </div>
+                )}
+
+                {/* Text area (always shown; in file mode shows extracted text) */}
+                <div>
+                  {smartImportMode === 'file' && smartImportText && (
+                    <p className="text-xs font-medium text-gray-500 mb-1">ข้อความที่อ่านได้จากไฟล์ (แก้ไขได้)</p>
+                  )}
+                  <textarea
+                    value={smartImportText}
+                    onChange={(e) => setSmartImportText(e.target.value)}
+                    placeholder={smartImportMode === 'file' ? 'ข้อความจากไฟล์จะปรากฏที่นี่...' : 'วางข้อความสัญญาที่นี่... เช่น สัญญาจ้างก่อสร้าง, สัญญาจัดซื้อ ฯลฯ\n\nAI จะวิเคราะห์และสร้าง Template โดยอัตโนมัติ รวมถึง:\n• ตัวแปร (เช่น ชื่อคู่สัญญา, มูลค่าสัญญา, วันที่)\n• ข้อสัญญาทางเลือก (ก/ข)\n• ข้อสัญญาที่ไม่บังคับ'}
+                    rows={smartImportMode === 'file' ? 8 : 12}
+                    className="w-full border rounded-lg p-3 text-sm font-mono resize-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    {smartImportText ? `${smartImportText.length.toLocaleString()} ตัวอักษร (สูงสุด ~20,000)` : 'รองรับข้อความสัญญาสูงสุด ~20,000 ตัวอักษร'}
+                  </p>
+                </div>
+
+                {/* Extra prompt */}
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+                    <MessageSquare className="w-4 h-4 text-purple-500" />
+                    Prompt เพิ่มเติม <span className="text-gray-400 font-normal">(ไม่บังคับ)</span>
+                  </label>
+                  <textarea
+                    value={smartImportPrompt}
+                    onChange={(e) => setSmartImportPrompt(e.target.value)}
+                    placeholder="เช่น: ให้ตั้งชื่อ template เป็นภาษาไทย, แยก clause ที่เกี่ยวกับค่าปรับออกมาให้ชัดเจน, ระบุ optional clause ทุกข้อที่ขึ้นต้นด้วย 'หากมี'..."
+                    rows={3}
+                    className="w-full border rounded-lg p-3 text-sm resize-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
               <div className="flex items-center justify-end gap-3 p-6 border-t">
                 <button
-                  onClick={() => setShowSmartImport(false)}
+                  onClick={() => { setShowSmartImport(false); setSmartImportMode('text'); setSmartImportText(''); setSmartImportPrompt(''); setSmartImportFile(null) }}
                   className="px-4 py-2 text-gray-700 border rounded-lg hover:bg-gray-50 transition"
                 >
                   ยกเลิก
                 </button>
                 <button
                   onClick={handleSmartImport}
-                  disabled={smartImportLoading || !smartImportText.trim()}
+                  disabled={smartImportLoading || smartImportFileLoading || !smartImportText.trim()}
                   className="flex items-center gap-2 px-5 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {smartImportLoading ? (

@@ -17,6 +17,169 @@ from app.models.vendor import Vendor
 from app.services.agent.trigger_service import on_contract_created
 
 router = APIRouter(tags=["Contracts"])
+
+
+# ── Neo4j KB sync ──────────────────────────────────────────────────────────────
+
+def _sync_contract_to_neo4j(
+    contract_id: str,
+    contract_no: Optional[str],
+    title: Optional[str],
+    value: Optional[float],
+    start_date,
+    end_date,
+    vendor_name: Optional[str],
+    project_name: Optional[str],
+    department_id: Optional[str],
+) -> None:
+    """
+    Upsert contract data into Neo4j Contracts KB as graph entities.
+    Called as a BackgroundTask so it never blocks the API response.
+    """
+    import hashlib
+    try:
+        from app.services.graph import (
+            get_contracts_graph_service,
+            GraphDocument, GraphEntity, GraphRelationship,
+            EntityType, RelationType, GraphDomain, SecurityLevel,
+        )
+        graph_service = get_contracts_graph_service()
+        if not graph_service or not graph_service.driver:
+            return
+
+        def make_id(etype: str, name: str) -> str:
+            return hashlib.md5(f"{etype}:{name}".lower().strip().encode()).hexdigest()
+
+        source = f"contract:{contract_id}"
+        entities: list = []
+        relationships: list = []
+
+        # Central CONTRACT entity (keyed by contract_id so re-runs are idempotent)
+        contract_eid = make_id("contract", contract_id)
+        display_name = title or contract_no or contract_id
+        entities.append(GraphEntity(
+            id=contract_eid,
+            type=EntityType.CONTRACT,
+            name=display_name,
+            source_doc=source,
+            confidence=1.0,
+            properties={"contract_id": contract_id, "contract_no": contract_no or ""},
+            department_id=department_id,
+            security_level=SecurityLevel.PUBLIC,
+        ))
+
+        # Contract number
+        if contract_no:
+            cn_id = make_id("contract_number", contract_no)
+            entities.append(GraphEntity(
+                id=cn_id, type=EntityType.CONTRACT_NUMBER, name=contract_no,
+                source_doc=source, confidence=1.0,
+                properties={"contract_id": contract_id},
+                department_id=department_id, security_level=SecurityLevel.PUBLIC,
+            ))
+            relationships.append(GraphRelationship(
+                id=str(uuid.uuid4()), type=RelationType.MENTIONS,
+                source_id=contract_eid, target_id=cn_id,
+                source_doc=source, confidence=1.0,
+                security_level=SecurityLevel.PUBLIC,
+            ))
+
+        # Value
+        if value:
+            val_id = make_id("money", f"{value:.0f}")
+            entities.append(GraphEntity(
+                id=val_id, type=EntityType.MONEY,
+                name=f"{value:,.0f} บาท",
+                source_doc=source, confidence=1.0,
+                properties={"amount": value, "currency": "THB"},
+                department_id=department_id, security_level=SecurityLevel.PUBLIC,
+            ))
+            relationships.append(GraphRelationship(
+                id=str(uuid.uuid4()), type=RelationType.HAS_VALUE,
+                source_id=contract_eid, target_id=val_id,
+                source_doc=source, confidence=1.0,
+                security_level=SecurityLevel.PUBLIC,
+            ))
+
+        # Start date
+        if start_date:
+            sd_id = make_id("start_date", str(start_date))
+            entities.append(GraphEntity(
+                id=sd_id, type=EntityType.START_DATE, name=str(start_date),
+                source_doc=source, confidence=1.0,
+                properties={"date": str(start_date)},
+                department_id=department_id, security_level=SecurityLevel.PUBLIC,
+            ))
+            relationships.append(GraphRelationship(
+                id=str(uuid.uuid4()), type=RelationType.HAS_START_DATE,
+                source_id=contract_eid, target_id=sd_id,
+                source_doc=source, confidence=1.0,
+                security_level=SecurityLevel.PUBLIC,
+            ))
+
+        # End date
+        if end_date:
+            ed_id = make_id("end_date", str(end_date))
+            entities.append(GraphEntity(
+                id=ed_id, type=EntityType.END_DATE, name=str(end_date),
+                source_doc=source, confidence=1.0,
+                properties={"date": str(end_date)},
+                department_id=department_id, security_level=SecurityLevel.PUBLIC,
+            ))
+            relationships.append(GraphRelationship(
+                id=str(uuid.uuid4()), type=RelationType.HAS_END_DATE,
+                source_id=contract_eid, target_id=ed_id,
+                source_doc=source, confidence=1.0,
+                security_level=SecurityLevel.PUBLIC,
+            ))
+
+        # Vendor / organization
+        if vendor_name:
+            org_id = make_id("org", vendor_name)
+            entities.append(GraphEntity(
+                id=org_id, type=EntityType.ORGANIZATION, name=vendor_name,
+                source_doc=source, confidence=1.0,
+                properties={"role": "contractor"},
+                department_id=department_id, security_level=SecurityLevel.PUBLIC,
+            ))
+            relationships.append(GraphRelationship(
+                id=str(uuid.uuid4()), type=RelationType.CONTRACTS_WITH,
+                source_id=org_id, target_id=contract_eid,
+                source_doc=source, confidence=1.0,
+                security_level=SecurityLevel.PUBLIC,
+            ))
+
+        # Project
+        if project_name:
+            proj_id = make_id("project", project_name)
+            entities.append(GraphEntity(
+                id=proj_id, type=EntityType.PROJECT, name=project_name,
+                source_doc=source, confidence=1.0,
+                properties={},
+                department_id=department_id, security_level=SecurityLevel.PUBLIC,
+            ))
+            relationships.append(GraphRelationship(
+                id=str(uuid.uuid4()), type=RelationType.PART_OF,
+                source_id=contract_eid, target_id=proj_id,
+                source_doc=source, confidence=1.0,
+                security_level=SecurityLevel.PUBLIC,
+            ))
+
+        graph_doc = GraphDocument(
+            doc_id=source,
+            doc_type="contract",
+            title=display_name,
+            domain=GraphDomain.CONTRACTS,
+            entities=entities,
+            relationships=relationships,
+            department_id=department_id,
+            security_level=SecurityLevel.PUBLIC,
+        )
+        ok = graph_service.save_graph_document(graph_doc)
+        logger.info(f"[KB] synced contract {contract_id} to Neo4j — {len(entities)} entities, ok={ok}")
+
+    except Exception as e:
+        logger.warning(f"[KB] failed to sync contract {contract_id} to Neo4j: {e}")
 logger = get_logger(__name__)
 
 
@@ -695,6 +858,20 @@ async def create_contract(
         except Exception as e:
             logger.error(f"Failed to update contract stats: {e}")
         
+        # Sync to Neo4j KB (background — non-blocking)
+        background_tasks.add_task(
+            _sync_contract_to_neo4j,
+            contract_id=contract.id,
+            contract_no=contract.contract_no,
+            title=contract.title,
+            value=float(contract.value_original) if contract.value_original else None,
+            start_date=contract.start_date,
+            end_date=contract.end_date,
+            vendor_name=contract.vendor_name,
+            project_name=contract.project_name,
+            department_id=contract.owner_department_id,
+        )
+
         # Trigger AI agents
         try:
             await on_contract_created(
@@ -709,7 +886,7 @@ async def create_contract(
             )
         except Exception as e:
             logger.error(f"Failed to trigger contract analysis: {e}")
-        
+
         return {
             "success": True,
             "message": "Contract created successfully",
@@ -731,6 +908,7 @@ async def create_contract(
 async def update_contract(
     contract_id: str,
     contract_data: dict,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user_payload: dict = Depends(get_current_user_payload)
 ):
@@ -769,7 +947,21 @@ async def update_contract(
         
         db.commit()
         db.refresh(contract)
-        
+
+        # Sync updated data to Neo4j KB
+        background_tasks.add_task(
+            _sync_contract_to_neo4j,
+            contract_id=contract.id,
+            contract_no=contract.contract_no,
+            title=contract.title,
+            value=float(contract.value_original) if contract.value_original else None,
+            start_date=contract.start_date,
+            end_date=contract.end_date,
+            vendor_name=contract.vendor_name,
+            project_name=contract.project_name,
+            department_id=contract.owner_department_id,
+        )
+
         return {
             "success": True,
             "message": "Contract updated successfully",
@@ -779,7 +971,7 @@ async def update_contract(
                 "status": contract.status.value,
             }
         }
-        
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to update contract: {str(e)}")
@@ -1034,6 +1226,134 @@ async def get_contract_stats(
 
 
 from sqlalchemy import func
+
+
+@router.get("/stats/report")
+async def get_contract_report(
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload)
+):
+    """
+    Full analytics report: monthly breakdown, type distribution,
+    expiring contracts (30 days), top vendors, status summary.
+    """
+    from datetime import timedelta
+    from sqlalchemy import extract, or_
+    from collections import defaultdict
+
+    base = db.query(Contract).filter(or_(Contract.is_deleted == 0, Contract.is_deleted == None))
+
+    # ── Monthly contracts (last 12 months) ──────────────────────────────────
+    now = datetime.utcnow()
+    monthly = []
+    for i in range(11, -1, -1):
+        month_start = (now.replace(day=1) - timedelta(days=i * 30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_end_approx = month_start.replace(day=28) + timedelta(days=4)
+        month_end = month_end_approx.replace(day=1)
+        count = base.filter(Contract.created_at >= month_start, Contract.created_at < month_end).count()
+        value = db.query(func.sum(Contract.value_original)).filter(
+            or_(Contract.is_deleted == 0, Contract.is_deleted == None),
+            Contract.created_at >= month_start,
+            Contract.created_at < month_end
+        ).scalar() or 0
+        monthly.append({
+            "month": month_start.strftime("%b %y"),
+            "month_full": month_start.strftime("%Y-%m"),
+            "count": count,
+            "value": float(value)
+        })
+
+    # ── Contract type distribution ───────────────────────────────────────────
+    type_labels = {
+        "construction": "เหมาก่อสร้าง",
+        "consulting": "จ้างที่ปรึกษา",
+        "procurement": "จัดซื้อจัดจ้าง",
+        "service": "จ้างบริการ",
+        "supply": "จัดหาวัสดุ",
+        "research": "วิจัยและพัฒนา",
+        "maintenance": "ซ่อมบำรุง",
+        "software": "พัฒนาซอฟต์แวร์",
+        "other": "อื่นๆ",
+    }
+    type_rows = db.query(
+        Contract.contract_type,
+        func.count(Contract.id).label("cnt"),
+        func.sum(Contract.value_original).label("val")
+    ).filter(
+        or_(Contract.is_deleted == 0, Contract.is_deleted == None)
+    ).group_by(Contract.contract_type).all()
+
+    type_distribution = [
+        {
+            "type": r.contract_type.value if r.contract_type else "other",
+            "label": type_labels.get(r.contract_type.value if r.contract_type else "other", "อื่นๆ"),
+            "count": r.cnt,
+            "value": float(r.val or 0)
+        }
+        for r in type_rows
+    ]
+
+    # ── Expiring contracts (within 30 days) ─────────────────────────────────
+    thirty_days = datetime.utcnow() + timedelta(days=30)
+    expiring_rows = base.filter(
+        Contract.status == ContractStatus.ACTIVE,
+        Contract.end_date <= thirty_days,
+        Contract.end_date >= datetime.utcnow()
+    ).order_by(Contract.end_date.asc()).limit(20).all()
+
+    expiring_contracts = [
+        {
+            "id": c.id,
+            "number": c.contract_no,
+            "title": c.title,
+            "value": float(c.value_original) if c.value_original else 0,
+            "end_date": c.end_date.isoformat() if c.end_date else None,
+            "days_left": (c.end_date - date.today()).days if c.end_date else None,
+            "vendor_name": c.vendor_name,
+        }
+        for c in expiring_rows
+    ]
+
+    # ── Top 5 vendors by contract count ─────────────────────────────────────
+    top_vendor_rows = db.query(
+        Contract.vendor_name,
+        func.count(Contract.id).label("cnt"),
+        func.sum(Contract.value_original).label("val")
+    ).filter(
+        or_(Contract.is_deleted == 0, Contract.is_deleted == None),
+        Contract.vendor_name != None,
+        Contract.vendor_name != ""
+    ).group_by(Contract.vendor_name).order_by(func.count(Contract.id).desc()).limit(5).all()
+
+    top_vendors = [
+        {
+            "name": r.vendor_name,
+            "contracts": r.cnt,
+            "value": float(r.val or 0)
+        }
+        for r in top_vendor_rows
+    ]
+
+    # ── Status summary ───────────────────────────────────────────────────────
+    status_rows = db.query(
+        Contract.status,
+        func.count(Contract.id).label("cnt")
+    ).filter(
+        or_(Contract.is_deleted == 0, Contract.is_deleted == None)
+    ).group_by(Contract.status).all()
+
+    status_summary = {(r.status.value if r.status else "unknown"): r.cnt for r in status_rows}
+
+    return {
+        "success": True,
+        "data": {
+            "monthly": monthly,
+            "type_distribution": type_distribution,
+            "expiring_contracts": expiring_contracts,
+            "top_vendors": top_vendors,
+            "status_summary": status_summary,
+        }
+    }
 
 
 async def update_contract_stats(db: Session, contract: Contract, user_id: str):

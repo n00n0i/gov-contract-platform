@@ -3,9 +3,10 @@ import { useNavigate, Link } from 'react-router-dom'
 import {
   Upload, FileText, Users, ChevronDown, User, LogOut,
   AlertTriangle, Clock, CheckCircle, TrendingUp, Calendar,
-  ArrowRight, Shield, Briefcase, Search, Mic, Camera, Wallet
+  ArrowRight, Shield, Briefcase, Search, Wallet, MessageSquare, BookOpen
 } from 'lucide-react'
 import NotificationDropdown from '../components/NotificationDropdown'
+import ChatSidebar from '../components/ChatSidebar'
 import axios from 'axios'
 
 const api = axios.create({
@@ -48,6 +49,8 @@ export default function Dashboard() {
     pendingPayment: 0
   })
   const [searchQuery, setSearchQuery] = useState('')
+  const [chatOpen, setChatOpen] = useState(false)
+  const [pendingQuestion, setPendingQuestion] = useState('')
 
   useEffect(() => {
     fetchUser()
@@ -208,15 +211,20 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* Google-Style Search Box */}
+        {/* Chat-based Search Box */}
         <div className="mb-8">
           <div className="max-w-2xl mx-auto">
-            <form onSubmit={(e) => {
-              e.preventDefault()
-              if (searchQuery.trim()) {
-                navigate(`/contracts?search=${encodeURIComponent(searchQuery)}`)
-              }
-            }} className="relative group">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (searchQuery.trim()) {
+                  setPendingQuestion(searchQuery.trim())
+                  setSearchQuery('')
+                  setChatOpen(true)
+                }
+              }}
+              className="relative group"
+            >
               <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
                 <Search className="w-5 h-5 text-gray-400 group-focus-within:text-blue-500 transition" />
               </div>
@@ -224,44 +232,42 @@ export default function Dashboard() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ค้นหาสัญญา เอกสาร หรือผู้รับจ้าง..."
-                className="w-full pl-12 pr-24 py-4 bg-white rounded-full shadow-lg border border-gray-200 
-                         text-lg text-gray-700 placeholder-gray-400
-                         focus:outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-300
-                         transition-all duration-200 hover:shadow-xl"
+                placeholder="ค้นหาหรือถามคำถาม... เช่น สัญญาใกล้หมดอายุ"
+                className="w-full pl-12 pr-16 py-4 bg-white rounded-full shadow-lg border border-gray-200
+                           text-lg text-gray-700 placeholder-gray-400
+                           focus:outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-300
+                           transition-all duration-200 hover:shadow-xl"
               />
-              <div className="absolute inset-y-0 right-4 flex items-center gap-2">
+              <div className="absolute inset-y-0 right-3 flex items-center">
                 <button
-                  type="button"
-                  className="p-2 hover:bg-gray-100 rounded-full transition"
-                  title="ค้นหาด้วยเสียง"
+                  type="submit"
+                  disabled={!searchQuery.trim()}
+                  className="p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300
+                             text-white rounded-full transition-colors duration-150"
+                  title="ถาม AI"
                 >
-                  <Mic className="w-5 h-5 text-gray-400 hover:text-blue-500" />
-                </button>
-                <button
-                  type="button"
-                  className="p-2 hover:bg-gray-100 rounded-full transition"
-                  title="ค้นหาด้วยรูปภาพ"
-                >
-                  <Camera className="w-5 h-5 text-gray-400 hover:text-blue-500" />
+                  <MessageSquare className="w-5 h-5" />
                 </button>
               </div>
             </form>
 
-            {/* Quick Search Tags */}
+            {/* Quick Prompts */}
             <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-              <span className="text-sm text-gray-500">ค้นหายอดนิยม:</span>
+              <span className="text-sm text-gray-500">ถามเลย:</span>
               {[
-                { label: 'สัญญาใกล้หมดอายุ', query: 'expiring' },
-                { label: 'รออนุมัติ', query: 'pending' },
-                { label: 'สัญญาก่อสร้าง', query: 'construction' },
-                { label: 'ผู้รับจ้างใหม่', query: 'new_vendor' },
+                { label: 'สัญญาใกล้หมดอายุ' },
+                { label: 'ภาพรวมสัญญาทั้งหมด' },
+                { label: 'ผู้รับจ้างที่มีสัญญามากที่สุด' },
+                { label: 'สัญญารออนุมัติ' },
               ].map((tag) => (
                 <button
-                  key={tag.query}
-                  onClick={() => navigate(`/contracts?search=${encodeURIComponent(tag.label)}`)}
-                  className="px-3 py-1.5 text-sm bg-white text-gray-600 rounded-full border border-gray-200 
-                           hover:bg-gray-50 hover:border-gray-300 transition"
+                  key={tag.label}
+                  onClick={() => {
+                    setPendingQuestion(tag.label)
+                    setChatOpen(true)
+                  }}
+                  className="px-3 py-1.5 text-sm bg-white text-gray-600 rounded-full border border-gray-200
+                             hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition"
                 >
                   {tag.label}
                 </button>
@@ -271,7 +277,7 @@ export default function Dashboard() {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
           <Link
             to="/upload"
             className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-blue-500"
@@ -328,6 +334,21 @@ export default function Dashboard() {
               <div>
                 <h3 className="font-semibold text-gray-900">รายงาน</h3>
                 <p className="text-sm text-gray-500">วิเคราะห์และสถิติ</p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            to="/knowledge-bases"
+            className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-indigo-500"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-indigo-100 rounded-lg">
+                <BookOpen className="w-8 h-8 text-indigo-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Knowledge Base</h3>
+                <p className="text-sm text-gray-500">RAG & GraphRAG</p>
               </div>
             </div>
           </Link>
@@ -487,6 +508,27 @@ export default function Dashboard() {
           <p>Gov Contract Platform v2.0.0 - Built for Thailand Government</p>
         </div>
       </footer>
+
+      {/* Floating chat button - visible when sidebar is closed */}
+      {!chatOpen && (
+        <button
+          onClick={() => setChatOpen(true)}
+          className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-blue-600 hover:bg-blue-700
+                     text-white rounded-full shadow-xl flex items-center justify-center
+                     transition-all duration-200 hover:scale-110"
+          title="เปิด AI ผู้ช่วย"
+        >
+          <MessageSquare className="w-6 h-6" />
+        </button>
+      )}
+
+      {/* Chat Sidebar */}
+      <ChatSidebar
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        pendingQuestion={pendingQuestion}
+        onPendingConsumed={() => setPendingQuestion('')}
+      />
     </div>
   )
 }

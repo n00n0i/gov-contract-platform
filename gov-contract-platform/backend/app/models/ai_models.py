@@ -176,6 +176,45 @@ class KnowledgeBase(BaseModel):
         }
 
 
+class KBDocument(Base, TimestampMixin):
+    """Document stored inside a user-managed Knowledge Base"""
+
+    __tablename__ = "kb_documents"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(__import__("uuid").uuid4()))
+    kb_id = Column(String(36), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename = Column(String(500), nullable=False)
+    storage_path = Column(String(1000), nullable=False)
+    storage_bucket = Column(String(255), default="govplatform")
+    mime_type = Column(String(100))
+    file_size = Column(Integer)
+    extracted_text = Column(Text)
+    # processing status: pending / processing / indexed / error
+    status = Column(String(50), default="pending")
+    error_message = Column(Text)
+    chunk_count = Column(Integer, default=0)
+    entity_count = Column(Integer, default=0)
+    uploaded_by = Column(String(36))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "kb_id": self.kb_id,
+            "filename": self.filename,
+            "storage_path": self.storage_path,
+            "storage_bucket": self.storage_bucket,
+            "mime_type": self.mime_type,
+            "file_size": self.file_size,
+            "status": self.status,
+            "error_message": self.error_message,
+            "chunk_count": self.chunk_count,
+            "entity_count": self.entity_count,
+            "uploaded_by": self.uploaded_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class AgentExecution(Base, TimestampMixin):
     """Log of agent executions"""
     

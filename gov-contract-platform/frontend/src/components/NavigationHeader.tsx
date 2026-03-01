@@ -41,6 +41,7 @@ export default function NavigationHeader({
         'profile': 'โปรไฟล์',
         'notifications': 'แจ้งเตือน',
         'new': 'สร้างใหม่',
+        'knowledge-bases': 'Knowledge Bases',
       }
       
       if (idx < paths.length - 1) {

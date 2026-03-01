@@ -7,6 +7,7 @@ import re
 from datetime import date
 from typing import Dict, Any
 from celery import shared_task
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
@@ -270,14 +271,14 @@ def process_contract_rag_indexing(self, document_id: str, tenant_id: str = None)
         kb_id = _get_or_create_system_contracts_kb(db)
 
         # 2. Chunk text (1000 chars, 200 overlap)
-        text = document.extracted_text
+        ocr_text = document.extracted_text
         chunk_size = 1000
         overlap = 200
         chunks = []
         start = 0
-        while start < len(text):
+        while start < len(ocr_text):
             end = start + chunk_size
-            chunks.append(text[start:end])
+            chunks.append(ocr_text[start:end])
             start += chunk_size - overlap
 
         if not chunks:
@@ -324,12 +325,12 @@ def process_contract_rag_indexing(self, document_id: str, tenant_id: str = None)
                 # Upsert into vector_chunks
                 vector_str = "[" + ",".join(str(v) for v in embedding) + "]"
                 db.execute(
-                    """
+                    text("""
                     INSERT INTO vector_chunks (kb_id, document_id, chunk_index, content, embedding, source_doc, metadata)
-                    VALUES (:kb_id, :document_id, :chunk_index, :content, :embedding::vector, :source_doc, :metadata)
+                    VALUES (:kb_id, :document_id, :chunk_index, :content, CAST(:embedding AS vector), :source_doc, CAST(:metadata AS jsonb))
                     ON CONFLICT (kb_id, document_id, chunk_index)
                     DO UPDATE SET content = EXCLUDED.content, embedding = EXCLUDED.embedding
-                    """,
+                    """),
                     {
                         "kb_id": kb_id,
                         "document_id": document_id,
@@ -346,6 +347,7 @@ def process_contract_rag_indexing(self, document_id: str, tenant_id: str = None)
                 inserted += 1
             except Exception as chunk_err:
                 logger.warning(f"[RAG Task] Failed to embed chunk {idx} for {document_id}: {chunk_err}")
+                db.rollback()
 
         db.commit()
         logger.info(f"[RAG Task] Indexed {inserted}/{len(chunks)} chunks for document {document_id}")

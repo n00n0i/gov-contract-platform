@@ -1,79 +1,130 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { 
-  TrendingUp, FileText, Users, DollarSign, 
-  Calendar, Download, Filter, PieChart, BarChart3, 
-  Activity, Clock, AlertTriangle, CheckCircle, 
-  ChevronDown, Printer, Share2, RefreshCw
+import { useState, useEffect, useCallback } from 'react'
+import {
+  TrendingUp, FileText, Users, DollarSign,
+  Calendar, Download, Filter, PieChart, BarChart3,
+  Activity, Clock, AlertTriangle, CheckCircle,
+  Printer, RefreshCw, Building2
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
 
-const api = axios.create({
-  baseURL: '/api/v1'
-})
-
+const api = axios.create({ baseURL: '/api/v1' })
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
+  if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 
-// Data will be fetched from API
-const stats = {
-  totalContracts: 0,
-  totalValue: 0,
-  activeContracts: 0,
-  completedContracts: 0,
-  expiredContracts: 0,
-  avgContractValue: 0,
-  contractsThisMonth: 0,
-  contractsGrowth: 0,
-  valueGrowth: 0
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface ContractSummary {
+  total_contracts: number
+  active_contracts: number
+  pending_approval: number
+  draft: number
+  completed: number
+  terminated: number
+  expiring_soon: number
+  total_value: number
 }
 
-const monthlyData: any[] = []
+interface MonthlyData { month: string; month_full: string; count: number; value: number }
+interface TypeItem    { type: string; label: string; count: number; value: number }
+interface ExpiringItem { id: string; number: string; title: string; value: number; end_date: string; days_left: number; vendor_name?: string }
+interface TopVendor   { name: string; contracts: number; value: number }
 
-const departmentData: any[] = []
+interface ReportData {
+  monthly: MonthlyData[]
+  type_distribution: TypeItem[]
+  expiring_contracts: ExpiringItem[]
+  top_vendors: TopVendor[]
+  status_summary: Record<string, number>
+}
 
-const vendorData: any[] = []
+interface VendorStats { total_vendors: number; active_vendors: number; blacklisted_vendors: number }
 
-const expiringContracts: any[] = []
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const fmt = (v: number) =>
+  new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(v)
+const fmtN = (v: number) => new Intl.NumberFormat('th-TH').format(v)
+const fmtM = (v: number) => {
+  if (v >= 1e9) return `${(v / 1e9).toFixed(1)} พันล.`
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1)} ล.`
+  if (v >= 1e3) return `${(v / 1e3).toFixed(0)} K`
+  return fmtN(v)
+}
 
+const TYPE_COLORS = [
+  'bg-blue-500','bg-green-500','bg-purple-500','bg-indigo-500','bg-yellow-500',
+  'bg-red-500','bg-gray-500','bg-pink-500','bg-teal-500','bg-cyan-500',
+]
+
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function Reports() {
-  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [dateRange, setDateRange] = useState('year')
-  const [department, setDepartment] = useState('all')
   const [activeTab, setActiveTab] = useState<'overview' | 'contracts' | 'vendors' | 'financial'>('overview')
 
-  useEffect(() => {
-    // Simulate loading
-    setTimeout(() => setLoading(false), 500)
+  const [summary, setSummary] = useState<ContractSummary | null>(null)
+  const [report, setReport] = useState<ReportData | null>(null)
+  const [vendorStats, setVendorStats] = useState<VendorStats | null>(null)
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [summaryRes, reportRes, vendorRes] = await Promise.all([
+        api.get('/contracts/stats/summary'),
+        api.get('/contracts/stats/report'),
+        api.get('/vendors/stats/summary'),
+      ])
+      if (summaryRes.data.success) setSummary(summaryRes.data.data)
+      if (reportRes.data.success)  setReport(reportRes.data.data)
+      if (vendorRes.data.success)  setVendorStats(vendorRes.data.data)
+    } catch {
+      setError('ไม่สามารถโหลดข้อมูลรายงานได้ กรุณาลองใหม่')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('th-TH', {
-      style: 'currency',
-      currency: 'THB',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(value)
-  }
+  useEffect(() => { fetchAll() }, [fetchAll])
 
-  const formatNumber = (value: number) => {
-    return new Intl.NumberFormat('th-TH').format(value)
+  // ── Bar chart ────────────────────────────────────────────────────────────
+  const renderBarChart = (data: MonthlyData[], valueKey: 'count' | 'value', color: string) => {
+    const max = Math.max(...data.map(d => d[valueKey]), 1)
+    return (
+      <div className="h-52 flex items-end justify-between gap-1.5">
+        {data.map((d, i) => (
+          <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded
+                            opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none z-10">
+              {valueKey === 'value' ? fmtM(d.value) : `${d.count} สัญญา`}
+            </div>
+            <div
+              className={`w-full ${color} rounded-t transition-all hover:opacity-80`}
+              style={{ height: `${Math.max((d[valueKey] / max) * 100, d[valueKey] > 0 ? 4 : 0)}%` }}
+            />
+            <span className="text-xs text-gray-500 truncate w-full text-center">{d.month}</span>
+          </div>
+        ))}
+      </div>
+    )
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+        <p className="text-gray-500 text-sm">กำลังโหลดรายงาน...</p>
       </div>
     )
   }
+
+  const monthly = report?.monthly ?? []
+  const expiring = report?.expiring_contracts ?? []
+  const topVendors = report?.top_vendors ?? []
+  const typeDistrib = report?.type_distribution ?? []
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -83,11 +134,21 @@ export default function Reports() {
         breadcrumbs={[{ label: 'รายงาน' }]}
         actions={(
           <div className="flex items-center gap-2">
-            <button className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 transition">
+            <button onClick={() => window.print()}
+              className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 transition">
               <Printer className="w-4 h-4" />
               <span className="hidden md:inline">พิมพ์</span>
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+            <button
+              onClick={() => {
+                const data = { summary, report, vendorStats, exported_at: new Date().toISOString() }
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url; a.download = `report-${new Date().toISOString().slice(0,10)}.json`; a.click()
+                URL.revokeObjectURL(url)
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
               <Download className="w-4 h-4" />
               <span className="hidden md:inline">ดาวน์โหลด</span>
             </button>
@@ -96,433 +157,352 @@ export default function Reports() {
       />
 
       <main className="max-w-7xl mx-auto px-4 py-8">
+        {/* Error */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+            <div className="flex items-center gap-2 text-red-700 text-sm">
+              <AlertTriangle className="w-4 h-4" /> {error}
+            </div>
+            <button onClick={fetchAll} className="text-sm text-red-600 hover:underline">ลองใหม่</button>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="bg-white rounded-xl shadow-sm border p-4 mb-6">
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
               <Calendar className="w-5 h-5 text-gray-400" />
-              <select
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value)}
-                className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-              >
+              <select value={dateRange} onChange={(e) => setDateRange(e.target.value)}
+                className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
                 <option value="month">เดือนนี้</option>
                 <option value="quarter">ไตรมาสนี้</option>
                 <option value="year">ปีนี้</option>
-                <option value="custom">กำหนดเอง</option>
               </select>
             </div>
-            <div className="flex items-center gap-2">
-              <Filter className="w-5 h-5 text-gray-400" />
-              <select
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="all">ทุกหน่วยงาน</option>
-                <option value="commerce">กรมการค้าต่างประเทศ</option>
-                <option value="account">กรมบัญชีกลาง</option>
-                <option value="revenue">กรมสรรพากร</option>
-                <option value="customs">กรมศุลกากร</option>
-              </select>
-            </div>
-            <button 
-              onClick={() => window.location.reload()}
-              className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition ml-auto"
-            >
-              <RefreshCw className="w-4 h-4" />
-              รีเฟรช
+            <button onClick={fetchAll}
+              className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition ml-auto">
+              <RefreshCw className="w-4 h-4" /> รีเฟรช
             </button>
           </div>
         </div>
 
         {/* Tabs */}
         <div className="bg-white rounded-xl shadow-sm border mb-6">
-          <div className="flex border-b">
+          <div className="flex border-b overflow-x-auto">
             {[
               { key: 'overview', label: 'ภาพรวม', icon: PieChart },
               { key: 'contracts', label: 'สัญญา', icon: FileText },
               { key: 'vendors', label: 'ผู้รับจ้าง', icon: Users },
               { key: 'financial', label: 'การเงิน', icon: DollarSign },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key as any)}
-                className={`flex items-center gap-2 px-6 py-4 font-medium transition ${
-                  activeTab === tab.key 
-                    ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' 
+            ].map(tab => (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
+                className={`flex items-center gap-2 px-6 py-4 font-medium transition whitespace-nowrap ${
+                  activeTab === tab.key
+                    ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                }`}
-              >
-                <tab.icon className="w-5 h-5" />
-                {tab.label}
+                }`}>
+                <tab.icon className="w-5 h-5" /> {tab.label}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Overview Tab */}
+        {/* ── Overview ──────────────────────────────────────────────────────── */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* Key Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <MetricCard
-                icon={<FileText className="w-6 h-6 text-blue-600" />}
-                title="สัญญาทั้งหมด"
-                value={formatNumber(stats.totalContracts)}
-                change={`+${stats.contractsGrowth}%`}
-                changeType="positive"
-              />
-              <MetricCard
-                icon={<DollarSign className="w-6 h-6 text-green-600" />}
-                title="มูลค่ารวม"
-                value={formatCurrency(stats.totalValue)}
-                change={`+${stats.valueGrowth}%`}
-                changeType="positive"
-              />
-              <MetricCard
-                icon={<CheckCircle className="w-6 h-6 text-purple-600" />}
-                title="สัญญาที่ใช้งาน"
-                value={formatNumber(stats.activeContracts)}
-                subtitle={`จาก ${stats.totalContracts} สัญญา`}
-              />
-              <MetricCard
-                icon={<Clock className="w-6 h-6 text-orange-600" />}
-                title="สัญญาใหม่เดือนนี้"
-                value={formatNumber(stats.contractsThisMonth)}
-                change="+3 จากเดือนที่แล้ว"
-                changeType="positive"
-              />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <MetricCard icon={<FileText className="w-6 h-6 text-blue-600" />}
+                title="สัญญาทั้งหมด" value={fmtN(summary?.total_contracts ?? 0)} />
+              <MetricCard icon={<DollarSign className="w-6 h-6 text-green-600" />}
+                title="มูลค่ารวม" value={fmtM(summary?.total_value ?? 0)} />
+              <MetricCard icon={<CheckCircle className="w-6 h-6 text-purple-600" />}
+                title="สัญญาที่ใช้งาน" value={fmtN(summary?.active_contracts ?? 0)}
+                subtitle={`จาก ${summary?.total_contracts ?? 0} สัญญา`} />
+              <MetricCard icon={<Clock className="w-6 h-6 text-orange-600" />}
+                title="ใกล้หมดอายุ (60 วัน)" value={fmtN(summary?.expiring_soon ?? 0)}
+                highlight={(summary?.expiring_soon ?? 0) > 0} />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Monthly Chart */}
+              {/* Monthly chart */}
               <div className="bg-white rounded-xl shadow-sm border p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">สัญญารายเดือน</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">จำนวนสัญญารายเดือน</h3>
                   <BarChart3 className="w-5 h-5 text-gray-400" />
                 </div>
-                <div className="h-64 flex items-end justify-between gap-2">
-                  {monthlyData.length > 0 ? monthlyData.map((data, idx) => (
-                    <div key={idx} className="flex-1 flex flex-col items-center gap-2">
-                      <div 
-                        className="w-full bg-blue-500 rounded-t hover:bg-blue-600 transition cursor-pointer relative group"
-                        style={{ height: `${(data.value / 200000000) * 100}%` }}
-                      >
-                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap">
-                          {formatCurrency(data.value)}
-                        </div>
-                      </div>
-                      <span className="text-xs text-gray-500">{data.month}</span>
-                    </div>
-                  )) : (
-                    <div className="flex items-center justify-center h-full text-gray-400">
-                      <p>ไม่มีข้อมูล</p>
-                    </div>
-                  )}
-                </div>
+                {monthly.length > 0
+                  ? renderBarChart(monthly, 'count', 'bg-blue-500')
+                  : <EmptyChart />}
               </div>
 
-              {/* Department Distribution */}
+              {/* Contract type distribution */}
               <div className="bg-white rounded-xl shadow-sm border p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">สัญญาตามหน่วยงาน</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">ประเภทสัญญา</h3>
                   <PieChart className="w-5 h-5 text-gray-400" />
                 </div>
-                <div className="space-y-4">
-                  {departmentData.length > 0 ? departmentData.map((dept, idx) => (
-                    <div key={idx}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm text-gray-700">{dept.name}</span>
-                        <span className="text-sm font-medium text-gray-900">
-                          {dept.contracts} สัญญา ({formatCurrency(dept.value)})
-                        </span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className={`${dept.color} h-2 rounded-full transition-all duration-500`}
-                          style={{ width: `${(dept.contracts / 35) * 100}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  )) : (
-                    <div className="text-center text-gray-400 py-8">
-                      <p>ไม่มีข้อมูล</p>
-                    </div>
-                  )}
-                </div>
+                {typeDistrib.length > 0 ? (
+                  <div className="space-y-3">
+                    {typeDistrib.slice(0, 6).map((t, i) => {
+                      const total = typeDistrib.reduce((s, x) => s + x.count, 0) || 1
+                      return (
+                        <div key={i}>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="text-gray-700">{t.label}</span>
+                            <span className="font-medium text-gray-900">{t.count} สัญญา</span>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-2">
+                            <div className={`${TYPE_COLORS[i % TYPE_COLORS.length]} h-2 rounded-full`}
+                              style={{ width: `${(t.count / total) * 100}%` }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : <EmptyChart />}
               </div>
             </div>
 
-            {/* Expiring Contracts */}
+            {/* Expiring contracts */}
             <div className="bg-white rounded-xl shadow-sm border p-6">
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900">สัญญาใกล้หมดอายุ</h3>
-                  <p className="text-sm text-gray-500">สัญญาที่จะหมดอายุภายใน 30 วัน</p>
+                  <p className="text-sm text-gray-500">ภายใน 30 วัน</p>
                 </div>
-                <AlertTriangle className="w-6 h-6 text-orange-500" />
+                <AlertTriangle className={`w-6 h-6 ${expiring.length > 0 ? 'text-orange-500' : 'text-gray-300'}`} />
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">เลขที่สัญญา</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">ชื่อสัญญา</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">มูลค่า</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">เหลือเวลา</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-700">สถานะ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {expiringContracts.length > 0 ? expiringContracts.map((contract) => (
-                      <tr key={contract.id} className="border-b hover:bg-gray-50">
-                        <td className="py-3 px-4 text-sm text-gray-900">{contract.number}</td>
-                        <td className="py-3 px-4 text-sm text-gray-700">{contract.title}</td>
-                        <td className="py-3 px-4 text-sm text-gray-900 text-right">{formatCurrency(contract.value)}</td>
-                        <td className="py-3 px-4 text-center">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            contract.daysLeft <= 7 ? 'bg-red-100 text-red-700' :
-                            contract.daysLeft <= 14 ? 'bg-orange-100 text-orange-700' :
-                            'bg-yellow-100 text-yellow-700'
-                          }`}>
-                            {contract.daysLeft} วัน
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <button className="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                            ดำเนินการ
-                          </button>
-                        </td>
+              {expiring.length === 0 ? (
+                <div className="py-10 text-center text-gray-400">
+                  <CheckCircle className="w-10 h-10 mx-auto mb-2 text-green-300" />
+                  <p className="text-sm">ไม่มีสัญญาที่ใกล้หมดอายุในช่วง 30 วัน</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 px-3 text-sm font-medium text-gray-700">เลขที่สัญญา</th>
+                        <th className="text-left py-2 px-3 text-sm font-medium text-gray-700">ชื่อสัญญา</th>
+                        <th className="text-left py-2 px-3 text-sm font-medium text-gray-700">ผู้รับจ้าง</th>
+                        <th className="text-right py-2 px-3 text-sm font-medium text-gray-700">มูลค่า</th>
+                        <th className="text-center py-2 px-3 text-sm font-medium text-gray-700">เหลือเวลา</th>
                       </tr>
-                    )) : null}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {expiring.map(c => (
+                        <tr key={c.id} className="border-b hover:bg-gray-50">
+                          <td className="py-2 px-3 text-sm text-gray-900">{c.number}</td>
+                          <td className="py-2 px-3 text-sm text-gray-700 max-w-xs truncate">{c.title}</td>
+                          <td className="py-2 px-3 text-sm text-gray-500">{c.vendor_name ?? '-'}</td>
+                          <td className="py-2 px-3 text-sm text-gray-900 text-right">{c.value ? fmtM(c.value) : '-'}</td>
+                          <td className="py-2 px-3 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              c.days_left <= 7  ? 'bg-red-100 text-red-700' :
+                              c.days_left <= 14 ? 'bg-orange-100 text-orange-700' :
+                                                  'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {c.days_left} วัน
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Contracts Tab */}
+        {/* ── Contracts Tab ─────────────────────────────────────────────────── */}
         {activeTab === 'contracts' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-500">สัญญาที่ดำเนินการ</p>
-                    <p className="text-2xl font-bold text-gray-900">89</p>
-                  </div>
-                  <div className="p-3 bg-blue-100 rounded-lg">
-                    <Activity className="w-6 h-6 text-blue-600" />
-                  </div>
-                </div>
-              </div>
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-500">สัญญาเสร็จสิ้น</p>
-                    <p className="text-2xl font-bold text-gray-900">45</p>
-                  </div>
-                  <div className="p-3 bg-green-100 rounded-lg">
-                    <CheckCircle className="w-6 h-6 text-green-600" />
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {[
+                { label: 'รออนุมัติ',  val: summary?.pending_approval ?? 0, color: 'blue',   Icon: Clock },
+                { label: 'ดำเนินการ',  val: summary?.active_contracts  ?? 0, color: 'green',  Icon: Activity },
+                { label: 'เสร็จสิ้น',  val: summary?.completed         ?? 0, color: 'purple', Icon: CheckCircle },
+                { label: 'ยกเลิก/สิ้นสุด', val: (summary?.terminated ?? 0), color: 'red', Icon: AlertTriangle },
+              ].map(({ label, val, color, Icon }) => (
+                <div key={label} className="bg-white rounded-xl shadow-sm border p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-500">{label}</p>
+                      <p className="text-2xl font-bold text-gray-900 mt-1">{fmtN(val)}</p>
+                    </div>
+                    <div className={`p-3 bg-${color}-100 rounded-lg`}>
+                      <Icon className={`w-6 h-6 text-${color}-600`} />
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-500">สัญญาหมดอายุ</p>
-                    <p className="text-2xl font-bold text-gray-900">22</p>
-                  </div>
-                  <div className="p-3 bg-red-100 rounded-lg">
-                    <AlertTriangle className="w-6 h-6 text-red-600" />
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">ประเภทสัญญา</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {[
-                  { type: 'จัดซื้อจัดจ้าง', count: 85, value: 890000000, color: 'bg-blue-500' },
-                  { type: 'เหมาก่อสร้าง', count: 32, value: 245000000, color: 'bg-green-500' },
-                  { type: 'จ้างบริการ', count: 28, value: 95000000, color: 'bg-purple-500' },
-                  { type: 'จ้างที่ปรึกษา', count: 15, value: 65000000, color: 'bg-indigo-500' },
-                  { type: 'เช่าทรัพย์สิน', count: 18, value: 42000000, color: 'bg-yellow-500' },
-                  { type: 'สัมปทาน', count: 8, value: 85000000, color: 'bg-red-500' },
-                  { type: 'ซ่อมบำรุง', count: 22, value: 28000000, color: 'bg-gray-500' },
-                  { type: 'ฝึกอบรม', count: 12, value: 15000000, color: 'bg-pink-500' },
-                  { type: 'วิจัยและพัฒนา', count: 6, value: 120000000, color: 'bg-teal-500' },
-                  { type: 'พัฒนาซอฟต์แวร์', count: 14, value: 55000000, color: 'bg-cyan-500' },
-                  { type: 'ประกันภัย', count: 9, value: 18000000, color: 'bg-orange-500' },
-                  { type: 'จัดหาพลังงาน', count: 7, value: 95000000, color: 'bg-amber-500' },
-                  { type: 'ขนส่ง/โลจิสติกส์', count: 11, value: 35000000, color: 'bg-lime-500' },
-                  { type: 'จัดการขยะ', count: 5, value: 22000000, color: 'bg-emerald-500' },
-                  { type: 'จัดการน้ำ', count: 6, value: 28000000, color: 'bg-sky-500' },
-                  { type: 'อื่นๆ', count: 8, value: 15000000, color: 'bg-slate-500' },
-                ].map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
-                    <div className={`w-12 h-12 ${item.color} rounded-lg flex items-center justify-center`}>
-                      <FileText className="w-6 h-6 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900">{item.type}</p>
-                      <p className="text-sm text-gray-500">{item.count} สัญญา</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium text-gray-900">{formatCurrency(item.value)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Vendors Tab */}
-        {activeTab === 'vendors' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-6">ผู้รับจ้าง TOP 5</h3>
-              <div className="space-y-4">
-                {vendorData.length > 0 ? vendorData.map((vendor, idx) => (
-                  <div key={idx} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
-                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
-                      {idx + 1}
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900">{vendor.name}</p>
-                      <p className="text-sm text-gray-500">{vendor.contracts} สัญญา</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium text-gray-900">{formatCurrency(vendor.value)}</p>
-                      <span className={`text-xs px-2 py-1 rounded-full ${
-                        vendor.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                      }`}>
-                        {vendor.status === 'active' ? 'ใช้งาน' : 'ตรวจสอบ'}
-                      </span>
-                    </div>
-                  </div>
-                )) : (
-                  <div className="text-center text-gray-400 py-8">
-                    <p>ไม่มีข้อมูลผู้รับจ้าง</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">สถานะผู้รับจ้าง</h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">ใช้งานอยู่</span>
-                    <span className="font-medium">42 ราย</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600"> blacklist</span>
-                    <span className="font-medium text-red-600">3 ราย</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">รอตรวจสอบ</span>
-                    <span className="font-medium text-yellow-600">5 ราย</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">การประเมินผู้รับจ้าง</h3>
-                <div className="text-center">
-                  <p className="text-4xl font-bold text-blue-600">4.2</p>
-                  <p className="text-sm text-gray-500">คะแนนเฉลี่ย</p>
-                  <p className="text-xs text-gray-400 mt-1">จาก 5 คะแนน</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Financial Tab */}
-        {activeTab === 'financial' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <p className="text-sm text-gray-500 mb-1">งบประมาณรวม</p>
-                <p className="text-2xl font-bold text-gray-900">{formatCurrency(1500000000)}</p>
-                <p className="text-sm text-green-600 mt-1">+5% จากปีที่แล้ว</p>
-              </div>
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <p className="text-sm text-gray-500 mb-1">ใช้จ่ายไปแล้ว</p>
-                <p className="text-2xl font-bold text-gray-900">{formatCurrency(890000000)}</p>
-                <p className="text-sm text-gray-500 mt-1">59% ของงบประมาณ</p>
-              </div>
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <p className="text-sm text-gray-500 mb-1">คงเหลือ</p>
-                <p className="text-2xl font-bold text-green-600">{formatCurrency(610000000)}</p>
-                <p className="text-sm text-gray-500 mt-1">41% ของงบประมาณ</p>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">การจ่ายเงินรายเดือน</h3>
-              <div className="h-64 flex items-end justify-between gap-2">
-                {monthlyData.length > 0 ? monthlyData.map((data, idx) => (
-                  <div key={idx} className="flex-1 flex flex-col items-center gap-2">
-                    <div 
-                      className="w-full bg-green-500 rounded-t hover:bg-green-600 transition cursor-pointer relative group"
-                      style={{ height: `${(data.value / 200000000) * 60}%` }}
-                    >
-                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap">
-                        {formatCurrency(data.value * 0.6)}
+              {typeDistrib.length === 0 ? (
+                <EmptyChart />
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {typeDistrib.map((item, i) => (
+                    <div key={i} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
+                      <div className={`w-10 h-10 ${TYPE_COLORS[i % TYPE_COLORS.length]} rounded-lg flex items-center justify-center flex-shrink-0`}>
+                        <FileText className="w-5 h-5 text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{item.label}</p>
+                        <p className="text-sm text-gray-500">{item.count} สัญญา</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="font-medium text-gray-900 text-sm">{fmtM(item.value)}</p>
                       </div>
                     </div>
-                    <span className="text-xs text-gray-500">{data.month}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Vendors Tab ───────────────────────────────────────────────────── */}
+        {activeTab === 'vendors' && (
+          <div className="space-y-6">
+            {/* Summary cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-xl shadow-sm border p-5">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-blue-100 rounded-lg"><Building2 className="w-6 h-6 text-blue-600" /></div>
+                  <div>
+                    <p className="text-sm text-gray-500">ผู้รับจ้างทั้งหมด</p>
+                    <p className="text-2xl font-bold text-gray-900">{fmtN(vendorStats?.total_vendors ?? 0)}</p>
+                    <p className="text-xs text-gray-400">ราย</p>
                   </div>
-                )) : (
-                  <div className="flex items-center justify-center h-full text-gray-400 w-full">
-                    <p>ไม่มีข้อมูล</p>
+                </div>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border p-5">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-green-100 rounded-lg"><CheckCircle className="w-6 h-6 text-green-600" /></div>
+                  <div>
+                    <p className="text-sm text-gray-500">ใช้งานอยู่</p>
+                    <p className="text-2xl font-bold text-gray-900">{fmtN(vendorStats?.active_vendors ?? 0)}</p>
+                    <p className="text-xs text-gray-400">ราย</p>
                   </div>
-                )}
+                </div>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border p-5">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-red-100 rounded-lg"><AlertTriangle className="w-6 h-6 text-red-600" /></div>
+                  <div>
+                    <p className="text-sm text-gray-500">แบล็คลิสต์</p>
+                    <p className="text-2xl font-bold text-gray-900">{fmtN(vendorStats?.blacklisted_vendors ?? 0)}</p>
+                    <p className="text-xs text-gray-400">ราย</p>
+                  </div>
+                </div>
               </div>
             </div>
 
+            {/* Top vendors */}
             <div className="bg-white rounded-xl shadow-sm border p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">สรุปการเงิน</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">รายการ</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">จำนวน</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">มูลค่า</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-b">
-                      <td className="py-3 px-4 text-sm text-gray-700">รอการอนุมัติ</td>
-                      <td className="py-3 px-4 text-sm text-gray-900 text-right">5 รายการ</td>
-                      <td className="py-3 px-4 text-sm text-gray-900 text-right">{formatCurrency(45000000)}</td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="py-3 px-4 text-sm text-gray-700">รอการจ่ายเงิน</td>
-                      <td className="py-3 px-4 text-sm text-gray-900 text-right">8 รายการ</td>
-                      <td className="py-3 px-4 text-sm text-gray-900 text-right">{formatCurrency(125000000)}</td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="py-3 px-4 text-sm text-gray-700">จ่ายเงินแล้ว</td>
-                      <td className="py-3 px-4 text-sm text-gray-900 text-right">142 รายการ</td>
-                      <td className="py-3 px-4 text-sm text-gray-900 text-right">{formatCurrency(890000000)}</td>
-                    </tr>
-                    <tr className="bg-gray-50">
-                      <td className="py-3 px-4 text-sm font-medium text-gray-900">รวม</td>
-                      <td className="py-3 px-4 text-sm font-medium text-gray-900 text-right">155 รายการ</td>
-                      <td className="py-3 px-4 text-sm font-medium text-gray-900 text-right">{formatCurrency(1060000000)}</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">ผู้รับจ้างสูงสุดตามจำนวนสัญญา</h3>
+              {topVendors.length === 0 ? (
+                <div className="py-10 text-center text-gray-400">
+                  <Users className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                  <p className="text-sm">ยังไม่มีข้อมูลผู้รับจ้าง</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {topVendors.map((v, i) => (
+                    <div key={i} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
+                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold text-sm flex-shrink-0">
+                        {i + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{v.name}</p>
+                        <p className="text-sm text-gray-500">{v.contracts} สัญญา</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="font-medium text-gray-900">{fmtM(v.value)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Financial Tab ─────────────────────────────────────────────────── */}
+        {activeTab === 'financial' && (
+          <div className="space-y-6">
+            {/* Value summary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-xl shadow-sm border p-5">
+                <p className="text-sm text-gray-500 mb-1">มูลค่าสัญญารวม</p>
+                <p className="text-2xl font-bold text-gray-900">{fmt(summary?.total_value ?? 0)}</p>
+                <p className="text-xs text-gray-400 mt-1">{fmtN(summary?.total_contracts ?? 0)} สัญญา</p>
               </div>
+              <div className="bg-white rounded-xl shadow-sm border p-5">
+                <p className="text-sm text-gray-500 mb-1">สัญญาดำเนินการอยู่</p>
+                <p className="text-2xl font-bold text-gray-900">{fmtN(summary?.active_contracts ?? 0)}</p>
+                <p className="text-xs text-gray-400 mt-1">รายการ</p>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border p-5">
+                <p className="text-sm text-gray-500 mb-1">สัญญาเสร็จสิ้น</p>
+                <p className="text-2xl font-bold text-green-600">{fmtN(summary?.completed ?? 0)}</p>
+                <p className="text-xs text-gray-400 mt-1">รายการ</p>
+              </div>
+            </div>
+
+            {/* Monthly value chart */}
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">มูลค่าสัญญารายเดือน</h3>
+              {monthly.length > 0
+                ? renderBarChart(monthly, 'value', 'bg-green-500')
+                : <EmptyChart />}
+            </div>
+
+            {/* Status breakdown */}
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">สรุปสถานะสัญญา</h3>
+              {!summary ? <EmptyChart /> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 px-4 text-sm font-medium text-gray-700">สถานะ</th>
+                        <th className="text-right py-2 px-4 text-sm font-medium text-gray-700">จำนวน</th>
+                        <th className="py-2 px-4 w-48"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { label: 'ร่าง (Draft)',            val: summary.draft },
+                        { label: 'รออนุมัติ',               val: summary.pending_approval },
+                        { label: 'ดำเนินการ (Active)',       val: summary.active_contracts },
+                        { label: 'เสร็จสิ้น (Completed)',   val: summary.completed },
+                        { label: 'ยกเลิก (Terminated)',     val: summary.terminated },
+                      ].map(({ label, val }, i) => (
+                        <tr key={i} className="border-b">
+                          <td className="py-2 px-4 text-sm text-gray-700">{label}</td>
+                          <td className="py-2 px-4 text-sm text-gray-900 text-right font-medium">{fmtN(val)}</td>
+                          <td className="py-2 px-4">
+                            <div className="w-full bg-gray-100 rounded-full h-1.5">
+                              <div className="bg-blue-500 h-1.5 rounded-full"
+                                style={{ width: `${(val / (summary.total_contracts || 1)) * 100}%` }} />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="bg-gray-50 font-medium">
+                        <td className="py-2 px-4 text-sm text-gray-900">รวม</td>
+                        <td className="py-2 px-4 text-sm text-gray-900 text-right">{fmtN(summary.total_contracts)}</td>
+                        <td />
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -531,42 +511,29 @@ export default function Reports() {
   )
 }
 
-function MetricCard({ 
-  icon, 
-  title, 
-  value, 
-  change, 
-  changeType,
-  subtitle 
-}: { 
-  icon: React.ReactNode
-  title: string
-  value: string
-  change?: string
-  changeType?: 'positive' | 'negative'
-  subtitle?: string
+// ── Sub-components ────────────────────────────────────────────────────────────
+function MetricCard({ icon, title, value, subtitle, highlight }: {
+  icon: React.ReactNode; title: string; value: string; subtitle?: string; highlight?: boolean
 }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-6">
+    <div className={`bg-white rounded-xl shadow-sm border p-5 ${highlight ? 'border-orange-300 bg-orange-50' : ''}`}>
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm text-gray-500 mb-1">{title}</p>
-          <p className="text-2xl font-bold text-gray-900">{value}</p>
-          {change && (
-            <p className={`text-sm mt-1 ${
-              changeType === 'positive' ? 'text-green-600' : 'text-red-600'
-            }`}>
-              {change}
-            </p>
-          )}
-          {subtitle && (
-            <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
-          )}
+          <p className={`text-2xl font-bold ${highlight ? 'text-orange-600' : 'text-gray-900'}`}>{value}</p>
+          {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
         </div>
-        <div className="p-3 bg-gray-100 rounded-lg">
-          {icon}
-        </div>
+        <div className="p-3 bg-gray-100 rounded-lg">{icon}</div>
       </div>
+    </div>
+  )
+}
+
+function EmptyChart() {
+  return (
+    <div className="h-52 flex flex-col items-center justify-center text-gray-300 gap-2">
+      <TrendingUp className="w-10 h-10" />
+      <p className="text-sm text-gray-400">ยังไม่มีข้อมูล</p>
     </div>
   )
 }

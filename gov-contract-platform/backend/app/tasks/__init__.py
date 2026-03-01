@@ -18,6 +18,7 @@ celery_app = Celery(
         "app.tasks.notification",
         "app.tasks.contract",
         "app.tasks.report",
+        "app.tasks.kb_document",
     ]
 )
 

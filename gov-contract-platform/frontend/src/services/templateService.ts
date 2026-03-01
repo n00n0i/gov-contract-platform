@@ -177,12 +177,21 @@ export const resetSystemExtractionPrompt = async (): Promise<{
 }
 
 // Smart Import
-export const smartImportTemplate = async (rawText: string, save = true): Promise<{
+export const smartImportTemplate = async (rawText: string, save = true, extraPrompt?: string): Promise<{
   success: boolean
   message: string
   data: { template_id: string; template_name: string; clauses_count: number; variables_count: number; conditional_groups_count: number }
 }> => {
-  const response = await api.post('/templates/import-smart', { raw_text: rawText, save })
+  const response = await api.post('/templates/import-smart', { raw_text: rawText, save, extra_prompt: extraPrompt || null })
+  return response.data
+}
+
+export const extractTextFromFile = async (file: File): Promise<{ success: boolean; raw_text: string; char_count: number }> => {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await api.post('/templates/extract-text', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return response.data
 }
 

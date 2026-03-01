@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
-import { 
+import {
   Plus, Trash2, GripVertical, ChevronUp, ChevronDown,
-  FileText, Save, X, AlertCircle, CheckCircle, 
-  Upload, Sparkles, Settings, FileUp, Loader2, Wand2
+  FileText, Save, X, AlertCircle,
+  Upload, Sparkles, Settings, FileUp, Loader2, Wand2,
+  Eye, RefreshCw, Tag, Hash, Calendar, AlignLeft, List
 } from 'lucide-react'
-import { 
-  createTemplate, 
-  getTemplateTypes, 
+import {
+  createTemplate,
+  getTemplateTypes,
   extractTemplateFromFile,
   getDefaultExtractionPrompt,
-  testExtractionPrompt 
+  testExtractionPrompt
 } from '../services/templateService'
 
 interface CreateTemplateProps {
@@ -24,12 +25,34 @@ interface Clause {
   content: string
 }
 
+interface Variable {
+  id: string
+  key: string
+  label: string
+  type: 'text' | 'number' | 'date' | 'select' | 'textarea'
+  required: boolean
+  default?: string
+  description?: string
+}
+
+const VAR_TYPE_ICONS: Record<Variable['type'], React.ReactNode> = {
+  text:     <Tag className="w-3.5 h-3.5" />,
+  number:   <Hash className="w-3.5 h-3.5" />,
+  date:     <Calendar className="w-3.5 h-3.5" />,
+  select:   <List className="w-3.5 h-3.5" />,
+  textarea: <AlignLeft className="w-3.5 h-3.5" />,
+}
+
+const VAR_TYPE_LABELS: Record<Variable['type'], string> = {
+  text: 'ข้อความ', number: 'ตัวเลข', date: 'วันที่', select: 'ตัวเลือก', textarea: 'ข้อความยาว'
+}
+
 export default function CreateTemplate({ onClose, onSuccess }: CreateTemplateProps) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [templateTypes, setTemplateTypes] = useState<{value: string, label: string}[]>([])
-  
+
   // Form state
   const [name, setName] = useState('')
   const [type, setType] = useState('')
@@ -37,7 +60,8 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
   const [clauses, setClauses] = useState<Clause[]>([
     { id: '1', number: 1, title: '', content: '' }
   ])
-  
+  const [variables, setVariables] = useState<Variable[]>([])
+
   // AI Extraction state
   const [showAIImport, setShowAIImport] = useState(false)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
@@ -47,21 +71,22 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
   const [defaultPrompt, setDefaultPrompt] = useState('')
   const [testingPrompt, setTestingPrompt] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  
+
+  // Original document preview
+  const [docBlobUrl, setDocBlobUrl] = useState<string | null>(null)
+
   useEffect(() => {
     loadTemplateTypes()
     loadDefaultPrompt()
+    return () => { if (docBlobUrl) URL.revokeObjectURL(docBlobUrl) }
   }, [])
-  
+
   const loadTemplateTypes = async () => {
     try {
       const types = await getTemplateTypes()
       setTemplateTypes(types || [])
-      if (types && types.length > 0) {
-        setType(types[0].value)
-      }
-    } catch (err) {
-      console.error('Failed to load template types:', err)
+      if (types && types.length > 0) setType(types[0].value)
+    } catch {
       setTemplateTypes([
         { value: 'procurement', label: 'จัดซื้อจัดจ้าง' },
         { value: 'construction', label: 'ก่อสร้าง' },
@@ -73,184 +98,166 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
       setType('procurement')
     }
   }
-  
+
   const loadDefaultPrompt = async () => {
     try {
       const result = await getDefaultExtractionPrompt()
-      if (result.success) {
-        setDefaultPrompt(result.data.default_prompt)
-      }
-    } catch (err) {
-      console.error('Failed to load default prompt:', err)
-    }
+      if (result.success) setDefaultPrompt(result.data.default_prompt)
+    } catch { /* ignore */ }
   }
-  
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
-      const allowedTypes = [
-        'application/pdf',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'image/jpeg',
-        'image/png',
-        'image/tiff'
-      ]
-      if (allowedTypes.includes(file.type) || file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
-        setUploadedFile(file)
-        setError(null)
-      } else {
-        setError('รองรับไฟล์ PDF, DOCX, JPG, PNG เท่านั้น')
-      }
+    if (!file) return
+    const allowedTypes = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'image/jpeg', 'image/png', 'image/tiff'
+    ]
+    if (allowedTypes.includes(file.type) || file.name.match(/\.docx?$/i)) {
+      if (docBlobUrl) URL.revokeObjectURL(docBlobUrl)
+      setDocBlobUrl(URL.createObjectURL(file))
+      setUploadedFile(file)
+      setError(null)
+    } else {
+      setError('รองรับไฟล์ PDF, DOCX, JPG, PNG เท่านั้น')
     }
   }
-  
+
   const handleAIExtract = async () => {
-    if (!uploadedFile) {
-      setError('กรุณาเลือกไฟล์ก่อน')
-      return
-    }
-    
+    if (!uploadedFile) { setError('กรุณาเลือกไฟล์ก่อน'); return }
     setExtracting(true)
     setError(null)
-    
     try {
-      const result = await extractTemplateFromFile(
-        uploadedFile, 
-        customPrompt.trim() || undefined
-      )
-      
+      const result = await extractTemplateFromFile(uploadedFile, customPrompt.trim() || undefined)
       if (result.success && result.data) {
-        // Populate form with extracted data
         setName(result.data.template_name || '')
         setDescription(result.data.description || '')
-        
-        // Try to match template type
-        const matchedType = templateTypes.find(t => 
+        const matchedType = templateTypes.find(t =>
           result.data.template_type?.toLowerCase().includes(t.label.toLowerCase())
         )
-        if (matchedType) {
-          setType(matchedType.value)
-        }
-        
-        // Populate clauses
-        if (result.data.clauses && result.data.clauses.length > 0) {
-          const newClauses = result.data.clauses.map((c, idx) => ({
+        if (matchedType) setType(matchedType.value)
+        if (result.data.clauses?.length > 0) {
+          const newClauses = result.data.clauses.map((c: any, idx: number) => ({
             id: `ai-${idx}`,
             number: c.number || idx + 1,
             title: c.title || '',
-            content: c.content || ''
+            content: c.content_template || c.content || ''
           }))
           setClauses(newClauses)
+          // Auto-detect variables after extract
+          detectVariablesFromClauses(newClauses)
         }
-        
-        // Close AI import section
         setShowAIImport(false)
-        setUploadedFile(null)
       } else {
         setError(result.message || 'ไม่สามารถถอดความจากไฟล์ได้')
       }
     } catch (err: any) {
-      console.error('AI extraction failed:', err)
       setError(err.response?.data?.detail || 'การถอดความด้วย AI ล้มเหลว')
     } finally {
       setExtracting(false)
     }
   }
-  
+
   const handleTestPrompt = async () => {
-    if (!customPrompt.trim()) {
-      setError('กรุณาระบุ Prompt ก่อนทดสอบ')
-      return
-    }
-    
+    if (!customPrompt.trim()) { setError('กรุณาระบุ Prompt ก่อนทดสอบ'); return }
     setTestingPrompt(true)
     try {
       const result = await testExtractionPrompt(customPrompt)
-      if (result.success) {
-        alert(`ผลการทดสอบ Prompt:\n\n${result.data.ai_response.substring(0, 500)}...`)
-      }
-    } catch (err) {
-      setError('การทดสอบ Prompt ล้มเหลว')
-    } finally {
-      setTestingPrompt(false)
-    }
+      if (result.success) alert(`ผลการทดสอบ:\n\n${result.data.ai_response.substring(0, 500)}...`)
+    } catch { setError('การทดสอบ Prompt ล้มเหลว') }
+    finally { setTestingPrompt(false) }
   }
-  
+
+  // ──────────────── Clause helpers ────────────────
+
   const addClause = () => {
-    const newNumber = clauses.length + 1
-    setClauses([...clauses, {
-      id: Date.now().toString(),
-      number: newNumber,
-      title: '',
-      content: ''
+    setClauses(prev => [...prev, {
+      id: Date.now().toString(), number: prev.length + 1, title: '', content: ''
     }])
   }
-  
+
   const removeClause = (id: string) => {
-    if (clauses.length <= 1) {
-      setError('ต้องมีข้อกำหนดอย่างน้อย 1 ข้อ')
-      return
-    }
-    const updated = clauses.filter(c => c.id !== id)
-    const renumbered = updated.map((c, idx) => ({
-      ...c,
-      number: idx + 1
-    }))
-    setClauses(renumbered)
+    if (clauses.length <= 1) { setError('ต้องมีข้อกำหนดอย่างน้อย 1 ข้อ'); return }
+    setClauses(prev => prev.filter(c => c.id !== id).map((c, idx) => ({ ...c, number: idx + 1 })))
     setError(null)
   }
-  
+
   const updateClause = (id: string, field: keyof Clause, value: string) => {
-    setClauses(clauses.map(c => 
-      c.id === id ? { ...c, [field]: value } : c
-    ))
+    setClauses(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
   }
-  
+
   const moveClause = (id: string, direction: 'up' | 'down') => {
     const index = clauses.findIndex(c => c.id === id)
     if (index === -1) return
-    
     if (direction === 'up' && index === 0) return
     if (direction === 'down' && index === clauses.length - 1) return
-    
-    const newClauses = [...clauses]
-    const targetIndex = direction === 'up' ? index - 1 : index + 1
-    
-    const temp = newClauses[index]
-    newClauses[index] = newClauses[targetIndex]
-    newClauses[targetIndex] = temp
-    
-    const renumbered = newClauses.map((c, idx) => ({
-      ...c,
-      number: idx + 1
-    }))
-    
-    setClauses(renumbered)
+    const next = [...clauses]
+    const target = direction === 'up' ? index - 1 : index + 1
+    ;[next[index], next[target]] = [next[target], next[index]]
+    setClauses(next.map((c, idx) => ({ ...c, number: idx + 1 })))
   }
-  
+
+  // ──────────────── Variable helpers ────────────────
+
+  const detectVariablesFromClauses = (src: Clause[] = clauses) => {
+    const pattern = /\{\{([a-z_][a-z0-9_]*)\}\}/gi
+    const found = new Set<string>()
+    src.forEach(c => {
+      for (const m of c.content.matchAll(pattern)) found.add(m[1].toLowerCase())
+    })
+    setVariables(prev => {
+      const next = [...prev]
+      found.forEach(key => {
+        if (!next.find(v => v.key === key)) {
+          next.push({
+            id: `${Date.now()}-${key}`,
+            key,
+            label: key.replace(/_/g, ' '),
+            type: key.includes('date') || key.includes('วัน') ? 'date'
+                : key.includes('amount') || key.includes('value') || key.includes('price') ? 'number'
+                : 'text',
+            required: true,
+          })
+        }
+      })
+      return next
+    })
+  }
+
+  const addVariable = () => {
+    setVariables(prev => [...prev, {
+      id: Date.now().toString(), key: '', label: '', type: 'text', required: true
+    }])
+  }
+
+  const removeVariable = (id: string) => setVariables(prev => prev.filter(v => v.id !== id))
+
+  const updateVariable = (id: string, field: keyof Variable, value: any) => {
+    setVariables(prev => prev.map(v => v.id === id ? { ...v, [field]: value } : v))
+  }
+
+  const insertPlaceholder = (clauseId: string, key: string) => {
+    const clause = clauses.find(c => c.id === clauseId)
+    if (!clause) return
+    updateClause(clauseId, 'content', clause.content + `{{${key}}}`)
+  }
+
+  // ──────────────── Save ────────────────
+
   const validateForm = () => {
-    if (!name.trim()) {
-      setError('กรุณาระบุชื่อ Template')
-      return false
-    }
-    if (!type) {
-      setError('กรุณาเลือกประเภทสัญญา')
-      return false
-    }
-    
-    const emptyClauses = clauses.filter(c => !c.title.trim())
-    if (emptyClauses.length > 0) {
-      setError(`ข้อที่ ${emptyClauses[0].number} ยังไม่มีหัวข้อ`)
-      return false
-    }
-    
+    if (!name.trim()) { setError('กรุณาระบุชื่อ Template'); return false }
+    if (!type) { setError('กรุณาเลือกประเภทสัญญา'); return false }
+    const empty = clauses.find(c => !c.title.trim())
+    if (empty) { setError(`ข้อที่ ${empty.number} ยังไม่มีหัวข้อ`); return false }
+    const badVars = variables.filter(v => !v.key.trim() || !v.label.trim())
+    if (badVars.length > 0) { setError('ตัวแปรบางรายการยังไม่ครบ (key และ label จำเป็น)'); return false }
     setError(null)
     return true
   }
-  
+
   const handleSave = async () => {
     if (!validateForm()) return
-    
     setSaving(true)
     try {
       const templateData = {
@@ -261,22 +268,29 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
           number: c.number,
           title: c.title.trim(),
           content: c.content.trim()
+        })),
+        variables: variables.map(v => ({
+          key: v.key.trim(),
+          label: v.label.trim(),
+          type: v.type,
+          required: v.required,
+          ...(v.default ? { default: v.default } : {}),
+          ...(v.description ? { description: v.description } : {}),
         }))
       }
-      
-      await createTemplate(templateData)
+      await createTemplate(templateData as any)
       onSuccess()
     } catch (err: any) {
-      console.error('Failed to create template:', err)
       setError(err.response?.data?.detail || 'ไม่สามารถสร้าง Template ได้')
     } finally {
       setSaving(false)
     }
   }
-  
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b">
           <div className="flex items-center gap-3">
@@ -285,17 +299,28 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
             </div>
             <div>
               <h2 className="text-xl font-semibold text-gray-900">สร้าง Template ใหม่</h2>
-              <p className="text-sm text-gray-500">สร้างแม่แบบสัญญาสำหรับใช้งานซ้ำ</p>
+              <p className="text-sm text-gray-500">สร้างแม่แบบสัญญาพร้อมช่องกรอกข้อมูล (fill-in-blank)</p>
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition"
-          >
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* View original document button */}
+            {docBlobUrl && (
+              <a
+                href={docBlobUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-3 py-1.5 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition"
+              >
+                <Eye className="w-4 h-4" />
+                ดูเอกสารต้นฉบับ
+              </a>
+            )}
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition">
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
         </div>
-        
+
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {error && (
@@ -304,7 +329,7 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
               <span>{error}</span>
             </div>
           )}
-          
+
           {/* AI Import Section */}
           <div className="mb-6">
             {!showAIImport ? (
@@ -328,27 +353,16 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
                     <h3 className="font-medium text-purple-900">นำเข้าด้วย AI</h3>
                   </div>
                   <button
-                    onClick={() => {
-                      setShowAIImport(false)
-                      setUploadedFile(null)
-                      setCustomPrompt('')
-                    }}
+                    onClick={() => { setShowAIImport(false); setUploadedFile(null); setCustomPrompt('') }}
                     className="text-sm text-purple-600 hover:text-purple-800"
                   >
                     ปิด
                   </button>
                 </div>
-                
+
                 {/* File Upload */}
                 <div className="mb-4">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.tiff"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                  
+                  <input ref={fileInputRef} type="file" accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.tiff" onChange={handleFileSelect} className="hidden" />
                   {!uploadedFile ? (
                     <button
                       onClick={() => fileInputRef.current?.click()}
@@ -367,33 +381,34 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
                           <p className="text-sm text-gray-500">{(uploadedFile.size / 1024).toFixed(1)} KB</p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => setUploadedFile(null)}
-                        className="p-2 hover:bg-red-100 rounded-lg text-red-500"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex gap-2">
+                        {docBlobUrl && (
+                          <a href={docBlobUrl} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 bg-blue-50 rounded hover:bg-blue-100"
+                          >
+                            <Eye className="w-3 h-3" /> ดูไฟล์
+                          </a>
+                        )}
+                        <button onClick={() => { setUploadedFile(null); setDocBlobUrl(null) }}
+                          className="p-2 hover:bg-red-100 rounded-lg text-red-500">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
-                
-                {/* Prompt Settings Toggle */}
+
+                {/* Prompt Settings */}
                 <div className="mb-4">
-                  <button
-                    onClick={() => setShowPromptSettings(!showPromptSettings)}
-                    className="flex items-center gap-2 text-sm text-purple-700 hover:text-purple-900"
-                  >
+                  <button onClick={() => setShowPromptSettings(!showPromptSettings)}
+                    className="flex items-center gap-2 text-sm text-purple-700 hover:text-purple-900">
                     <Settings className="w-4 h-4" />
                     {showPromptSettings ? 'ซ่อนการตั้งค่า Prompt' : 'ตั้งค่า Prompt สำหรับถอดความ'}
                   </button>
                 </div>
-                
-                {/* Custom Prompt */}
                 {showPromptSettings && (
                   <div className="mb-4 p-3 bg-white rounded-lg border">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Prompt สำหรับถอดความ (可选)
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Prompt (ไม่บังคับ)</label>
                     <textarea
                       value={customPrompt}
                       onChange={(e) => setCustomPrompt(e.target.value)}
@@ -402,171 +417,224 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
                       className="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-purple-500"
                     />
                     <div className="flex items-center justify-between mt-2">
-                      <button
-                        onClick={() => setCustomPrompt(defaultPrompt)}
-                        className="text-xs text-purple-600 hover:text-purple-800"
-                      >
+                      <button onClick={() => setCustomPrompt(defaultPrompt)} className="text-xs text-purple-600 hover:text-purple-800">
                         ใช้ Default Prompt
                       </button>
-                      <button
-                        onClick={handleTestPrompt}
-                        disabled={testingPrompt || !customPrompt.trim()}
-                        className="text-xs flex items-center gap-1 px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50"
-                      >
-                        {testingPrompt ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Sparkles className="w-3 h-3" />
-                        )}
+                      <button onClick={handleTestPrompt} disabled={testingPrompt || !customPrompt.trim()}
+                        className="text-xs flex items-center gap-1 px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50">
+                        {testingPrompt ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                         ทดสอบ Prompt
                       </button>
                     </div>
                   </div>
                 )}
-                
-                {/* Extract Button */}
-                <button
-                  onClick={handleAIExtract}
-                  disabled={!uploadedFile || extracting}
-                  className="w-full py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2 transition"
-                >
-                  {extracting ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      AI กำลังถอดความ...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-5 h-5" />
-                      ถอดความด้วย AI
-                    </>
-                  )}
+
+                <button onClick={handleAIExtract} disabled={!uploadedFile || extracting}
+                  className="w-full py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2 transition">
+                  {extracting ? <><Loader2 className="w-5 h-5 animate-spin" /> AI กำลังถอดความ...</>
+                             : <><Sparkles className="w-5 h-5" /> ถอดความด้วย AI</>}
                 </button>
-                
                 <p className="mt-3 text-xs text-gray-500 text-center">
                   AI จะวิเคราะห์เอกสารและสร้าง Template โดยอัตโนมัติ คุณสามารถแก้ไขได้ภายหลัง
                 </p>
               </div>
             )}
           </div>
-          
+
           <div className="space-y-6">
             {/* Basic Info */}
             <div className="bg-gray-50 rounded-lg p-4 space-y-4">
               <h3 className="font-medium text-gray-900">ข้อมูลพื้นฐาน</h3>
-              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ชื่อ Template <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ Template <span className="text-red-500">*</span></label>
+                  <input type="text" value={name} onChange={(e) => setName(e.target.value)}
                     placeholder="เช่น สัญญาจัดซื้อจัดจ้างทั่วไป"
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
                 </div>
-                
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ประเภทสัญญา <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={type}
-                    onChange={(e) => setType(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทสัญญา <span className="text-red-500">*</span></label>
+                  <select value={type} onChange={(e) => setType(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                     <option value="">เลือกประเภท</option>
-                    {templateTypes.map(t => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
+                    {templateTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                 </div>
               </div>
-              
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  คำอธิบาย
-                </label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="คำอธิบายเกี่ยวกับ Template นี้..."
-                  rows={2}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+                <label className="block text-sm font-medium text-gray-700 mb-1">คำอธิบาย</label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)}
+                  placeholder="คำอธิบายเกี่ยวกับ Template นี้..." rows={2}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
               </div>
             </div>
-            
+
+            {/* ── Variables (fill-in-blank) ── */}
+            <div className="border rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 bg-amber-50 border-b border-amber-200">
+                <div>
+                  <h3 className="font-medium text-amber-900">ตัวแปร (Fill-in-blank)</h3>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    ใช้ <code className="bg-amber-100 px-1 rounded">{'{{key}}'}</code> ในเนื้อหาข้อสัญญา แล้วกำหนดตัวแปรที่นี่
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => detectVariablesFromClauses()}
+                    title="ตรวจจาก clause อัตโนมัติ"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-amber-700 bg-amber-100 rounded-lg hover:bg-amber-200 transition"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> ตรวจจาก Clause
+                  </button>
+                  <button
+                    onClick={addVariable}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> เพิ่มตัวแปร
+                  </button>
+                </div>
+              </div>
+
+              {variables.length === 0 ? (
+                <div className="p-6 text-center text-gray-400 text-sm">
+                  ยังไม่มีตัวแปร — เพิ่มโดยใส่ <code className="bg-gray-100 px-1 rounded">{'{{ชื่อตัวแปร}}'}</code> ในเนื้อหาข้อสัญญา<br/>แล้วกด "ตรวจจาก Clause" หรือเพิ่มด้วยตนเอง
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {/* Column headers */}
+                  <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-gray-50 text-xs font-medium text-gray-500">
+                    <div className="col-span-3">Key (ใน Clause)</div>
+                    <div className="col-span-4">Label (แสดงแก่ผู้ใช้)</div>
+                    <div className="col-span-2">ชนิด</div>
+                    <div className="col-span-2">ค่าเริ่มต้น</div>
+                    <div className="col-span-1"></div>
+                  </div>
+                  {variables.map(v => (
+                    <div key={v.id} className="grid grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50">
+                      {/* key */}
+                      <div className="col-span-3">
+                        <div className="flex items-center gap-1.5">
+                          <code className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-mono truncate">
+                            {'{{' + v.key + '}}'}
+                          </code>
+                        </div>
+                        <input
+                          type="text"
+                          value={v.key}
+                          onChange={(e) => updateVariable(v.id, 'key', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
+                          placeholder="variable_key"
+                          className="mt-1 w-full px-2 py-1 text-xs border rounded font-mono focus:ring-1 focus:ring-amber-400"
+                        />
+                      </div>
+                      {/* label */}
+                      <div className="col-span-4">
+                        <input
+                          type="text"
+                          value={v.label}
+                          onChange={(e) => updateVariable(v.id, 'label', e.target.value)}
+                          placeholder="เช่น ชื่อผู้ว่าจ้าง"
+                          className="w-full px-2 py-1 text-sm border rounded focus:ring-1 focus:ring-amber-400"
+                        />
+                      </div>
+                      {/* type */}
+                      <div className="col-span-2">
+                        <select
+                          value={v.type}
+                          onChange={(e) => updateVariable(v.id, 'type', e.target.value as Variable['type'])}
+                          className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-amber-400"
+                        >
+                          {Object.entries(VAR_TYPE_LABELS).map(([val, lbl]) => (
+                            <option key={val} value={val}>{lbl}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {/* default */}
+                      <div className="col-span-2">
+                        <input
+                          type="text"
+                          value={v.default ?? ''}
+                          onChange={(e) => updateVariable(v.id, 'default', e.target.value)}
+                          placeholder="ค่าเริ่มต้น"
+                          className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-amber-400"
+                        />
+                      </div>
+                      {/* remove */}
+                      <div className="col-span-1 flex justify-end">
+                        <button onClick={() => removeVariable(v.id)}
+                          className="p-1.5 hover:bg-red-100 rounded text-red-400 hover:text-red-600">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Clauses */}
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-medium text-gray-900">ข้อกำหนดในสัญญา</h3>
-                <span className="text-sm text-gray-500">
-                  จำนวน {clauses.length} ข้อ
-                </span>
+                <span className="text-sm text-gray-500">{clauses.length} ข้อ</span>
               </div>
-              
+
               <div className="space-y-3">
                 {clauses.map((clause, index) => (
-                  <div 
-                    key={clause.id}
-                    className="bg-white border rounded-lg p-4 hover:border-blue-300 transition"
-                  >
+                  <div key={clause.id} className="bg-white border rounded-lg p-4 hover:border-blue-300 transition">
                     <div className="flex items-start gap-3">
-                      {/* Drag handle & Number */}
                       <div className="flex flex-col items-center gap-1 pt-1">
                         <div className="p-1 hover:bg-gray-100 rounded cursor-move">
                           <GripVertical className="w-4 h-4 text-gray-400" />
                         </div>
-                        <span className="text-sm font-medium text-gray-500 w-6 text-center">
-                          {clause.number}
-                        </span>
+                        <span className="text-sm font-medium text-gray-500 w-6 text-center">{clause.number}</span>
                       </div>
-                      
-                      {/* Content */}
-                      <div className="flex-1 space-y-3">
+
+                      <div className="flex-1 space-y-2">
                         <input
                           type="text"
                           value={clause.title}
                           onChange={(e) => updateClause(clause.id, 'title', e.target.value)}
                           placeholder={`หัวข้อข้อที่ ${clause.number}`}
-                          className="w-full px-3 py-2 border rounded-lg font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="w-full px-3 py-2 border rounded-lg font-medium focus:ring-2 focus:ring-blue-500"
                         />
                         <textarea
                           value={clause.content}
                           onChange={(e) => updateClause(clause.id, 'content', e.target.value)}
-                          placeholder="เนื้อหาข้อกำหนด..."
-                          rows={3}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          placeholder={`เนื้อหาข้อกำหนด... ใช้ {{ชื่อตัวแปร}} สำหรับช่องกรอก เช่น สัญญาเลขที่ {{contract_no}} ลงวันที่ {{contract_date}}`}
+                          rows={4}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 font-mono"
                         />
+                        {/* Quick-insert variable chips */}
+                        {variables.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="text-xs text-gray-400 self-center">แทรก:</span>
+                            {variables.map(v => (
+                              <button
+                                key={v.id}
+                                onClick={() => insertPlaceholder(clause.id, v.key)}
+                                disabled={!v.key}
+                                title={v.label}
+                                className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full hover:bg-amber-100 disabled:opacity-40"
+                              >
+                                {VAR_TYPE_ICONS[v.type]}
+                                {v.label || v.key || '...'}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      
-                      {/* Actions */}
+
                       <div className="flex flex-col gap-1">
-                        <button
-                          onClick={() => moveClause(clause.id, 'up')}
-                          disabled={index === 0}
-                          className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30"
-                          title="เลื่อนขึ้น"
-                        >
+                        <button onClick={() => moveClause(clause.id, 'up')} disabled={index === 0}
+                          className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30">
                           <ChevronUp className="w-4 h-4 text-gray-500" />
                         </button>
-                        <button
-                          onClick={() => moveClause(clause.id, 'down')}
-                          disabled={index === clauses.length - 1}
-                          className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30"
-                          title="เลื่อนลง"
-                        >
+                        <button onClick={() => moveClause(clause.id, 'down')} disabled={index === clauses.length - 1}
+                          className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30">
                           <ChevronDown className="w-4 h-4 text-gray-500" />
                         </button>
-                        <button
-                          onClick={() => removeClause(clause.id)}
-                          className="p-1.5 hover:bg-red-100 rounded text-red-500"
-                          title="ลบข้อนี้"
-                        >
+                        <button onClick={() => removeClause(clause.id)}
+                          className="p-1.5 hover:bg-red-100 rounded text-red-500">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -574,44 +642,33 @@ export default function CreateTemplate({ onClose, onSuccess }: CreateTemplatePro
                   </div>
                 ))}
               </div>
-              
-              {/* Add Clause Button */}
-              <button
-                onClick={addClause}
-                className="mt-3 w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition flex items-center justify-center gap-2"
-              >
-                <Plus className="w-5 h-5" />
-                เพิ่มข้อกำหนด
+
+              <button onClick={addClause}
+                className="mt-3 w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition flex items-center justify-center gap-2">
+                <Plus className="w-5 h-5" /> เพิ่มข้อกำหนด
               </button>
             </div>
           </div>
         </div>
-        
+
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-6 border-t bg-gray-50">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition"
-          >
-            ยกเลิก
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition"
-          >
-            {saving ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                กำลังบันทึก...
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                บันทึก Template
-              </>
-            )}
-          </button>
+        <div className="flex items-center justify-between p-6 border-t bg-gray-50">
+          <p className="text-xs text-gray-400">
+            {variables.length > 0 && `${variables.length} ตัวแปร · `}{clauses.length} ข้อกำหนด
+          </p>
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="px-6 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition">
+              ยกเลิก
+            </button>
+            <button onClick={handleSave} disabled={saving}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition">
+              {saving ? (
+                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> กำลังบันทึก...</>
+              ) : (
+                <><Save className="w-4 h-4" /> บันทึก Template</>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
