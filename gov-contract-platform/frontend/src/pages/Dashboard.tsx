@@ -324,21 +324,6 @@ export default function Dashboard() {
           </Link>
 
           <Link
-            to="/reports"
-            className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-orange-500"
-          >
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-orange-100 rounded-lg">
-                <TrendingUp className="w-8 h-8 text-orange-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">รายงาน</h3>
-                <p className="text-sm text-gray-500">วิเคราะห์และสถิติ</p>
-              </div>
-            </div>
-          </Link>
-
-          <Link
             to="/knowledge-bases"
             className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-indigo-500"
           >
@@ -349,6 +334,21 @@ export default function Dashboard() {
               <div>
                 <h3 className="font-semibold text-gray-900">Knowledge Base</h3>
                 <p className="text-sm text-gray-500">RAG & GraphRAG</p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            to="/reports"
+            className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-orange-500"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-orange-100 rounded-lg">
+                <TrendingUp className="w-8 h-8 text-orange-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">รายงาน</h3>
+                <p className="text-sm text-gray-500">วิเคราะห์และสถิติ</p>
               </div>
             </div>
           </Link>
