@@ -12,6 +12,23 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+export interface TemplateVariable {
+  key: string
+  label: string
+  type: 'text' | 'number' | 'date' | 'select'
+  required: boolean
+  options?: string[]
+  default?: string
+  description?: string
+}
+
+export interface ConditionalGroup {
+  key: string
+  label: string
+  options: { value: string; label: string }[]
+  default?: string
+}
+
 export interface Template {
   id: string
   name: string
@@ -25,12 +42,19 @@ export interface Template {
   createdBy: string
   isSystem: boolean
   clauses_data?: TemplateClause[]
+  variables?: TemplateVariable[]
+  conditionalGroups?: ConditionalGroup[]
+  hasRawContent?: boolean
 }
 
 export interface TemplateClause {
   number: number
   title: string
   content: string
+  content_template?: string
+  optional?: boolean
+  condition_key?: string
+  condition_value?: string
 }
 
 export interface AIExtractResult {
@@ -149,5 +173,33 @@ export const resetSystemExtractionPrompt = async (): Promise<{
   }
 }> => {
   const response = await api.post('/templates/settings/extraction-prompt/reset')
+  return response.data
+}
+
+// Smart Import
+export const smartImportTemplate = async (rawText: string, save = true): Promise<{
+  success: boolean
+  message: string
+  data: { template_id: string; template_name: string; clauses_count: number; variables_count: number; conditional_groups_count: number }
+}> => {
+  const response = await api.post('/templates/import-smart', { raw_text: rawText, save })
+  return response.data
+}
+
+// Draft Contract
+export const draftContract = async (
+  templateId: string,
+  variableValues: Record<string, any>,
+  conditionalSelections: Record<string, string> = {},
+  includeOptional: Record<string, boolean> = {}
+): Promise<{
+  success: boolean
+  data: { contract_text: string; template_name: string; variables_filled: number }
+}> => {
+  const response = await api.post(`/templates/${templateId}/draft`, {
+    variable_values: variableValues,
+    conditional_selections: conditionalSelections,
+    include_optional: includeOptional,
+  })
   return response.data
 }

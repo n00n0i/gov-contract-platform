@@ -46,7 +46,8 @@ class DocumentBase(BaseModel):
 
 
 class DocumentCreate(DocumentBase):
-    pass
+    is_draft: bool = True
+    is_main_document: bool = False
 
 
 class DocumentUpdate(BaseModel):
@@ -64,6 +65,9 @@ class OCRResult(BaseModel):
     confidence: Optional[float] = None
     error: Optional[str] = None
     extracted_data: Optional[Dict[str, Any]] = None
+    pages: Optional[int] = None
+    language: Optional[str] = None
+    ocr_engine: Optional[str] = None
 
 
 class DocumentVerifyRequest(BaseModel):
@@ -84,6 +88,7 @@ class DocumentResponse(DocumentBase):
     download_url: Optional[str] = None
     ocr_status: Optional[str] = None
     ocr_confidence: Optional[float] = None
+    ocr_engine: Optional[str] = None
     extracted_text: Optional[str] = None
     extracted_data: Optional[Dict[str, Any]] = None
     page_count: Optional[int] = None
@@ -93,6 +98,8 @@ class DocumentResponse(DocumentBase):
     processed_at: Optional[datetime] = None
     verified_by: Optional[str] = None
     verified_at: Optional[datetime] = None
+    is_draft: Optional[bool] = True
+    is_main_document: Optional[bool] = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

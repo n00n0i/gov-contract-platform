@@ -1,6 +1,7 @@
 """
 Settings API Routes - User preferences, OCR, AI configuration
 """
+import os
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -91,6 +92,12 @@ class AIFeaturesSettings(BaseModel):
     smart_classification: bool = True
     anomaly_detection: bool = True
     contract_analysis: bool = True
+
+
+class AIConnectionTestRequest(BaseModel):
+    type: str
+    url: str
+    api_key: str = ""
 
 
 class RAGSettings(BaseModel):
@@ -369,7 +376,7 @@ def get_ocr_settings(
             "extract_tables": True,
             "confidence_threshold": 80,
             "typhoon_url": "https://api.opentyphoon.ai/v1/ocr",
-            "typhoon_key": "sk-N0BWvEJ7sMUxQrE9k4JIRL9ehdGZZRy7fP3gPtnie8QkZ8Kg",
+            "typhoon_key": os.getenv("TYPHOON_API_KEY", ""),
             "typhoon_model": "typhoon-ocr",
             "typhoon_task_type": "default",
             "typhoon_max_tokens": 16384,
@@ -434,12 +441,12 @@ def get_ai_settings(
         provider_schemas = [
             {
                 "id": "default-llm",
-                "name": "Local Ollama (LLM)",
-                "type": "ollama",
+                "name": "OpenAI (LLM)",
+                "type": "openai-compatible",
                 "modelType": "llm",
-                "url": "http://ollama:11434",
-                "apiKey": "",
-                "model": "llama3.1",
+                "url": "https://api.openai.com/v1",
+                "apiKey": os.getenv("OPENAI_API_KEY", ""),
+                "model": "gpt-4o-mini",
                 "temperature": 0.7,
                 "maxTokens": 2048,
                 "supportsGraphRAG": False
@@ -639,13 +646,155 @@ def get_ai_provider(
     }
 
 
+@router.patch("/ai/providers/{provider_id}/set-default")
+def set_default_provider(
+    provider_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Immediately set a provider as the active default (LLM or Embedding)"""
+    provider = db.query(AIProvider).filter(
+        AIProvider.id == provider_id,
+        AIProvider.user_id == user_id
+    ).first()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if "chat" in (provider.capabilities or []):
+        user.active_llm_provider_id = provider_id
+        kind = "LLM"
+    elif "embedding" in (provider.capabilities or []):
+        user.active_embedding_provider_id = provider_id
+        kind = "Embedding"
+    else:
+        raise HTTPException(status_code=400, detail="Provider has no recognised capability (chat/embedding)")
+
+    # Also keep preferences in sync for legacy code
+    prefs = user.preferences or {}
+    ai_prefs = prefs.get("ai_settings", {})
+    if kind == "LLM":
+        ai_prefs["activeLLMId"] = provider_id
+    else:
+        ai_prefs["activeEmbeddingId"] = provider_id
+    prefs["ai_settings"] = ai_prefs
+    user.preferences = prefs
+
+    db.commit()
+    logger.info(f"Set default {kind} provider to {provider_id} for user {user_id}")
+    return {"success": True, "message": f"ตั้งค่า {kind} default เรียบร้อย", "kind": kind}
+
+
+def _normalize_base_url(url: str) -> str:
+    """Normalize URL: strip trailing slash and /v1 suffix"""
+    base = url.rstrip('/')
+    if base.endswith('/v1'):
+        base = base[:-3]
+    return base
+
+
+def _do_connection_test(provider_type: str, url: str, api_key: str = "") -> Dict[str, Any]:
+    """Shared logic for testing AI provider connection via backend"""
+    import httpx
+
+    headers: Dict[str, str] = {}
+    if api_key:
+        headers['Authorization'] = f"Bearer {api_key}"
+
+    base_url = _normalize_base_url(url)
+    test_url = ""
+    models_count = 0
+    success = False
+    message = ""
+
+    try:
+        if provider_type == "ollama":
+            test_url = f"{base_url}/api/tags"
+            response = httpx.get(test_url, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                models_count = len(data.get("models", []))
+                success = True
+                message = f"เชื่อมต่อ Ollama สำเร็จ! พบ {models_count} Models"
+            else:
+                message = f"ไม่สามารถเชื่อมต่อกับ Ollama ได้ (HTTP {response.status_code})"
+        elif provider_type in ("openai-compatible", "vllm"):
+            test_url = f"{base_url}/v1/models"
+            response = httpx.get(test_url, headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                models_count = len(data.get("data", []))
+                success = True
+                message = f"เชื่อมต่อสำเร็จ! พบ {models_count} Models"
+            else:
+                error_msg = ""
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", {}).get("message", "")
+                except Exception:
+                    pass
+                message = f"ไม่สามารถเชื่อมต่อกับ API ได้ (HTTP {response.status_code}: {error_msg or response.text[:200]})"
+        else:
+            message = f"ไม่รองรับประเภท provider: {provider_type}"
+
+        return {"success": success, "message": message, "url": test_url, "models_count": models_count}
+    except httpx.RequestError as e:
+        return {"success": False, "message": f"เกิดข้อผิดพลาดในการเชื่อมต่อ: {str(e)}", "url": test_url}
+    except Exception as e:
+        return {"success": False, "message": f"เกิดข้อผิดพลาด: {str(e)}", "url": test_url}
+
+
+@router.post("/ai/test-connection")
+def test_ai_connection(
+    request: AIConnectionTestRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Test AI provider connection without saving to DB (for new providers)"""
+    result = _do_connection_test(request.type, request.url, request.api_key)
+    return result
+
+
+@router.post("/ai/fetch-models")
+def fetch_ai_models(
+    request: AIConnectionTestRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Fetch available models from AI provider via backend proxy"""
+    import httpx
+
+    headers: Dict[str, str] = {}
+    if request.api_key:
+        headers['Authorization'] = f"Bearer {request.api_key}"
+
+    base_url = _normalize_base_url(request.url)
+    models: list = []
+
+    try:
+        if request.type == "ollama":
+            response = httpx.get(f"{base_url}/api/tags", timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                models = [m["name"] for m in data.get("models", [])]
+        elif request.type in ("openai-compatible", "vllm"):
+            response = httpx.get(f"{base_url}/v1/models", headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                models = [m["id"] for m in data.get("data", [])]
+        return {"success": True, "models": models}
+    except Exception as e:
+        return {"success": False, "models": [], "error": str(e)}
+
+
 @router.post("/ai/providers/{provider_id}/test")
 def test_ai_provider(
     provider_id: str,
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
-    """Test AI provider connection"""
+    """Test AI provider connection (saved provider)"""
     provider = db.query(AIProvider).filter(
         AIProvider.id == provider_id,
         AIProvider.user_id == user_id
@@ -654,12 +803,10 @@ def test_ai_provider(
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
 
-    # TODO: Implement actual connection test
-    return {
-        "success": True,
-        "message": "Connection test passed",
-        "provider": provider.name
-    }
+    result = _do_connection_test(provider.provider_type, provider.api_url or "", provider.api_key or "")
+    result["provider"] = provider.name
+    result["type"] = provider.provider_type
+    return result
 
 
 # ============== RAG Settings ==============

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Upload, File, X, Loader2, CheckCircle, AlertCircle, FileText, Image, FileSpreadsheet, Edit2, Save, Eye, ExternalLink } from 'lucide-react'
+import { Upload, File, X, Loader2, CheckCircle, AlertCircle, FileText, Image, FileSpreadsheet, Edit2, Save, Eye, ExternalLink, Code } from 'lucide-react'
 import axios from 'axios'
 
 interface ExtractedDocumentData {
@@ -23,8 +23,12 @@ interface UploadFile {
   documentId?: string
   documentUrl?: string
   extractedData?: ExtractedDocumentData
+  extractedText?: string
   editedData?: ExtractedDocumentData
+  ocrEngine?: string
   error?: string
+  isDraft?: boolean
+  isMainDocument?: boolean
 }
 
 interface FileUploadProps {
@@ -33,6 +37,8 @@ interface FileUploadProps {
   documentType?: string
   contractId?: string
   vendorId?: string
+  isDraft?: boolean
+  isMainDocument?: boolean
 }
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
@@ -57,10 +63,11 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-export function FileUpload({ onUploadComplete, onRemove, documentType = 'other', contractId, vendorId }: FileUploadProps) {
+export function FileUpload({ onUploadComplete, onRemove, documentType = 'other', contractId, vendorId, isDraft = true, isMainDocument = false }: FileUploadProps) {
   const [files, setFiles] = useState<UploadFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [showExtractedData, setShowExtractedData] = useState<string | null>(null)
+  const [showJsonResult, setShowJsonResult] = useState<string | null>(null)
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
   const [editFormData, setEditFormData] = useState<ExtractedDocumentData>({})
 
@@ -92,7 +99,7 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
 
   const addFiles = useCallback((newFiles: FileList) => {
     const uploadFiles: UploadFile[] = []
-    
+
     Array.from(newFiles).forEach((file) => {
       const error = validateFile(file)
       uploadFiles.push({
@@ -105,9 +112,9 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
         error: error || undefined
       })
     })
-    
+
     setFiles((prev) => [...prev, ...uploadFiles])
-    
+
     // Auto upload valid files
     uploadFiles.filter(f => f.status === 'pending').forEach(uploadFile)
   }, [])
@@ -123,6 +130,8 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
       const formData = new FormData()
       formData.append('file', uploadFile.file)
       formData.append('document_type', documentType)
+      formData.append('is_draft', String(isDraft))
+      formData.append('is_main_document', String(isMainDocument))
       if (contractId) formData.append('contract_id', contractId)
       if (vendorId) formData.append('vendor_id', vendorId)
 
@@ -145,12 +154,13 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
       setFiles((prev) =>
         prev.map((f) =>
           f.id === uploadFile.id
-            ? { 
-                ...f, 
-                status: 'processing', 
-                documentId: response.data.id
-                // Note: We use /view proxy endpoint instead of presigned URL
-              }
+            ? {
+              ...f,
+              status: 'processing',
+              documentId: response.data.id,
+              isDraft: response.data.is_draft ?? true,
+              isMainDocument: response.data.is_main_document ?? false,
+            }
             : f
         )
       )
@@ -186,13 +196,13 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
         }
 
         const response = await api.get(`/documents/${documentId}/ocr-status`)
-        const { ocr_status, extracted_data } = response.data
+        const { ocr_status, extracted_data, ocr_engine, active_ocr_engine, extracted_text } = response.data
 
         if (ocr_status === 'completed') {
           setFiles((prev) =>
             prev.map((f) =>
-              f.id === fileId 
-                ? { ...f, status: 'completed', extractedData: extracted_data } 
+              f.id === fileId
+                ? { ...f, status: 'completed', extractedData: extracted_data, ocrEngine: ocr_engine || active_ocr_engine, extractedText: extracted_text }
                 : f
             )
           )
@@ -200,21 +210,24 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
         } else if (ocr_status === 'failed') {
           setFiles((prev) =>
             prev.map((f) =>
-              f.id === fileId 
-                ? { ...f, status: 'error', error: 'OCR processing failed' } 
+              f.id === fileId
+                ? { ...f, status: 'error', error: 'OCR processing failed', ocrEngine: active_ocr_engine }
                 : f
             )
           )
         } else {
-          // Still processing, check again in 3 seconds
+          // Still processing — update active engine label and check again
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.id === fileId ? { ...f, ocrEngine: active_ocr_engine } : f
+            )
+          )
           setTimeout(checkStatus, 3000)
         }
-      } catch (error) {
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileId ? { ...f, status: 'error', error: 'Failed to check status' } : f
-          )
-        )
+      } catch (error: any) {
+        console.error('OCR status check error:', error)
+        // If the endpoint returns an error, continue polling
+        setTimeout(checkStatus, 3000)
       }
     }
 
@@ -248,7 +261,7 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
 
   const formatExtractedData = (data: ExtractedDocumentData | undefined) => {
     if (!data) return null
-    
+
     const items = []
     if (data.contract_number) items.push({ label: 'เลขที่สัญญา', value: data.contract_number })
     if (data.counterparty) items.push({ label: 'คู่สัญญา', value: data.counterparty })
@@ -258,7 +271,7 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
     if (data.start_date) items.push({ label: 'วันที่เริ่มต้น', value: data.start_date })
     if (data.end_date) items.push({ label: 'วันที่สิ้นสุด', value: data.end_date })
     if (data.duration_months) items.push({ label: 'ระยะเวลา', value: `${data.duration_months} เดือน` })
-    
+
     return items
   }
 
@@ -274,14 +287,14 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
     try {
       // Save to backend
       await api.patch(`/documents/${file.documentId}/extracted-data`, editFormData)
-      
-      setFiles(prev => prev.map(f => 
-        f.id === fileId 
+
+      setFiles(prev => prev.map(f =>
+        f.id === fileId
           ? { ...f, editedData: editFormData }
           : f
       ))
       setEditingFileId(null)
-      
+
       // Notify parent component
       if (onUploadComplete) {
         onUploadComplete(file.documentId, editFormData)
@@ -294,21 +307,21 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
 
   const handleViewDocument = async (file: UploadFile) => {
     if (!file.documentId) return
-    
+
     try {
       // Fetch document with auth headers through our API instance
       // ResponseType 'blob' for binary data (PDF)
       const response = await api.get(`/documents/${file.documentId}/view`, {
         responseType: 'blob'
       })
-      
+
       // Create blob URL from the response data
       const blob = new Blob([response.data], { type: 'application/pdf' })
       const blobUrl = URL.createObjectURL(blob)
-      
+
       // Open blob URL in new tab
       window.open(blobUrl, '_blank')
-      
+
       // Clean up blob URL after a delay (browser will keep it for the tab)
       setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
     } catch (error) {
@@ -334,8 +347,8 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer
-          ${isDragging 
-            ? 'border-blue-500 bg-blue-50' 
+          ${isDragging
+            ? 'border-blue-500 bg-blue-50'
             : 'border-gray-300 hover:border-gray-400 bg-gray-50'
           }`}
       >
@@ -371,11 +384,11 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
             >
               <div className="flex items-center gap-4">
                 {getFileIcon(file.file.type)}
-                
+
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-900 truncate">{file.name}</p>
                   <p className="text-sm text-gray-500">{formatFileSize(file.size)}</p>
-                  
+
                   {/* Progress Bar */}
                   {file.status === 'uploading' && (
                     <div className="mt-2">
@@ -391,21 +404,54 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                       </div>
                     </div>
                   )}
-                  
+
                   {file.status === 'processing' && (
-                    <div className="mt-2 flex items-center gap-2 text-sm text-blue-600">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>กำลังประมวลผล OCR...</span>
+                    <div className="mt-2 space-y-1">
+                      <div className="flex items-center gap-2 text-sm text-blue-600">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>กำลังประมวลผล OCR...</span>
+                      </div>
+                      {file.ocrEngine && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                          <Code className="w-3 h-3 mr-1" />
+                          {file.ocrEngine}
+                        </span>
+                      )}
                     </div>
                   )}
-                  
+
                   {file.status === 'completed' && (
                     <div className="mt-2 flex items-center gap-2">
                       <CheckCircle className="w-4 h-4 text-green-600" />
                       <span className="text-sm text-green-600">อัปโหลดและประมวลผลเสร็จสิ้น</span>
                     </div>
                   )}
-                  
+
+                  {/* OCR Engine Display */}
+                  {file.status === 'completed' && file.ocrEngine && (
+                    <div className="mt-1">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                        <Code className="w-3 h-3 mr-1" />
+                        {file.ocrEngine}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Document role badge */}
+                  {file.status === 'completed' && (
+                    <div className="mt-1">
+                      {file.isMainDocument ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
+                          เอกสารหลัก
+                        </span>
+                      ) : file.isDraft ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-700">
+                          ร่าง
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+
                   {file.status === 'error' && (
                     <div className="mt-2 flex items-center gap-2 text-sm text-red-600">
                       <AlertCircle className="w-4 h-4" />
@@ -435,6 +481,17 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                       {showExtractedData === file.id ? 'ซ่อนข้อมูล' : 'ดูข้อมูล'}
                     </button>
                   )}
+                  {file.extractedData && (
+                    <button
+                      onClick={() => setShowJsonResult(
+                        showJsonResult === file.id ? null : file.id
+                      )}
+                      className="px-3 py-1 text-sm text-purple-600 hover:bg-purple-100 rounded-lg transition flex items-center gap-1"
+                    >
+                      <Code className="w-3 h-3" />
+                      JSON
+                    </button>
+                  )}
                   <button
                     onClick={() => removeFile(file.id)}
                     className="p-2 hover:bg-gray-100 rounded-full transition"
@@ -462,7 +519,7 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                       </button>
                     )}
                   </div>
-                  
+
                   {editingFileId === file.id ? (
                     // Edit Form
                     <div className="space-y-4">
@@ -492,7 +549,7 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
                         </div>
-                        
+
                         {/* Row 2: Contract Type & Value */}
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -519,7 +576,7 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                           />
                         </div>
                       </div>
-                      
+
                       {/* Row 3: Project Name (Full Width) */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -533,7 +590,7 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
-                      
+
                       <div className="grid grid-cols-2 gap-4">
                         {/* Row 4: Start Date & End Date */}
                         <div>
@@ -558,7 +615,7 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
                         </div>
-                        
+
                         {/* Row 5: Duration Months & Warranty Months */}
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -573,11 +630,11 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                           />
                         </div>
                       </div>
-                      
+
                       <p className="text-xs text-gray-500">
                         * วันที่ใช้รูปแบบ YYYY-MM-DD, ตัวเลขอย่างน้อย 2 ตำแหน่ง
                       </p>
-                      
+
                       {/* Action Buttons */}
                       <div className="flex gap-2 pt-2">
                         <button
@@ -606,6 +663,42 @@ export function FileUpload({ onUploadComplete, onRemove, documentType = 'other',
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* JSON Result Viewer */}
+              {showJsonResult === file.id && (
+                <div className="mt-4 p-4 bg-gray-900 rounded-lg border border-gray-700">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-medium text-white flex items-center gap-2">
+                      <Code className="w-4 h-4 text-purple-400" />
+                      Full OCR Result
+                    </h4>
+                    <button
+                      onClick={() => setShowJsonResult(null)}
+                      className="p-1 hover:bg-gray-700 rounded transition"
+                    >
+                      <X className="w-4 h-4 text-gray-400" />
+                    </button>
+                  </div>
+                  <div className="space-y-4">
+                    {file.extractedData && (
+                      <div>
+                        <p className="text-xs text-gray-400 mb-2">Extracted Data (Structured):</p>
+                        <pre className="text-xs text-green-400 font-mono overflow-x-auto max-h-40 p-3 bg-gray-800 rounded">
+                          {JSON.stringify(file.extractedData, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    {file.extractedText && (
+                      <div>
+                        <p className="text-xs text-gray-400 mb-2">Extracted Text (Raw OCR):</p>
+                        <pre className="text-xs text-blue-300 font-mono overflow-x-auto max-h-40 p-3 bg-gray-800 rounded">
+                          {file.extractedText}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

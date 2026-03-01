@@ -15,7 +15,7 @@ from app.db.database import get_db
 from app.models.identity import User, Role, Department, UserStatus
 from app.core.security import verify_password, hash_password, create_access_token, get_current_user_id
 
-router = APIRouter(prefix="/identity", tags=["Identity"])
+router = APIRouter(tags=["Identity"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/identity/login")
 

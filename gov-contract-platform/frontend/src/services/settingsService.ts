@@ -61,6 +61,11 @@ export const saveAIFeatures = async (features: any) => {
   return response.data
 }
 
+export const setDefaultAIProvider = async (providerId: string) => {
+  const response = await api.patch(`/settings/ai/providers/${providerId}/set-default`)
+  return response.data
+}
+
 // ============== RAG Settings ==============
 export const getRagSettings = async () => {
   const response = await api.get('/settings/rag')

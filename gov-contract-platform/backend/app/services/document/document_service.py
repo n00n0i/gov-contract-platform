@@ -7,18 +7,21 @@ All OCR operations use settings from Settings > OCR (OCRSettingsService).
 import io
 import uuid
 import logging
+import asyncio
 from typing import Optional, BinaryIO
 from datetime import datetime
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-from app.models.contract import ContractAttachment
+from app.models.contract import ContractAttachment, Contract, ContractStatus, ContractType, ClassificationLevel
 from app.schemas.document import (
-    DocumentCreate, DocumentUpdate, OCRResult, DocumentStatus, FileType
+    DocumentCreate, DocumentUpdate, OCRResult, DocumentStatus, FileType, DocumentType
 )
 from app.services.storage.minio_service import get_storage_service
 from app.services.document.ocr_service import get_ocr_service, OCRService
 from app.services.document.ocr_settings_service import get_ocr_settings_service, OCRSettingsService
+from app.services.agent.trigger_service import on_contract_created
+from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +35,7 @@ class DocumentService:
         self.tenant_id = tenant_id
         self.storage = get_storage_service()
     
-    def upload_document(
+    async def upload_document(
         self,
         file: BinaryIO,
         filename: str,
@@ -44,8 +47,9 @@ class DocumentService:
         
         Flow:
         1. Upload file to MinIO
-        2. Create document record
-        3. Queue OCR processing (async)
+        2. If document_type is 'contract' and contract_id is None, create a new Contract
+        3. Create document record (attach to existing or new contract)
+        4. Queue OCR processing (async)
         """
         try:
             # Upload to storage
@@ -65,11 +69,48 @@ class DocumentService:
             file_type = self._get_file_type(content_type, filename)
             extension = filename.split('.')[-1].lower() if '.' in filename else ''
             
+            # If uploading a contract document without an existing contract, create one
+            new_contract = None
+            if document_data.document_type == DocumentType.CONTRACT and not document_data.contract_id:
+                # Generate contract number based on year and sequence
+                year = datetime.utcnow().year
+                max_contract = self.db.query(func.max(Contract.contract_no)).filter(
+                    Contract.contract_no.like(f"CON-{year}-%")
+                ).scalar()
+                
+                if max_contract:
+                    # Extract sequence number
+                    seq = int(max_contract.split("-")[-1]) + 1
+                    contract_no = f"CON-{year}-{seq:06d}"
+                else:
+                    contract_no = f"CON-{year}-000001"
+                
+                # Create new contract
+                new_contract = Contract(
+                    id=str(uuid.uuid4()),
+                    contract_no=contract_no,
+                    title=f"สัญญาใหม่ - {filename}",
+                    title_en=f"New Contract - {filename}",
+                    description=f"สร้างจากเอกสารอัปโหลด: {filename}",
+                    contract_type=ContractType.PROCUREMENT,
+                    classification=ClassificationLevel.RESTRICTED,
+                    status=ContractStatus.DRAFT,
+                    currency="THB",
+                    owner_user_id=self.user_id,
+                    created_by=self.user_id,
+                    updated_by=self.user_id,
+                )
+                self.db.add(new_contract)
+                self.db.commit()
+                self.db.refresh(new_contract)
+                
+                logger.info(f"Created new contract {new_contract.id} from document upload: {contract_no}")
+            
             # Create document record
             document = ContractAttachment(
                 id=str(uuid.uuid4()),
                 tenant_id=self.tenant_id,
-                contract_id=document_data.contract_id,
+                contract_id=document_data.contract_id or (new_contract.id if new_contract else None),
                 
                 # File info
                 filename=document_data.filename or filename,
@@ -91,7 +132,11 @@ class DocumentService:
                 # Status
                 status=DocumentStatus.UPLOADING.value,
                 ocr_status="pending",
-                
+
+                # Document role
+                is_draft=document_data.is_draft if hasattr(document_data, 'is_draft') else True,
+                is_main_document=document_data.is_main_document if hasattr(document_data, 'is_main_document') else False,
+
                 # Audit
                 uploaded_by=self.user_id,
                 uploaded_at=datetime.utcnow(),
@@ -101,6 +146,27 @@ class DocumentService:
             self.db.add(document)
             self.db.commit()
             self.db.refresh(document)
+            
+            # If we created a new contract, update stats and trigger agents
+            if new_contract:
+                try:
+                    await self._update_contract_stats(self.db, new_contract, self.user_id)
+                except Exception as e:
+                    logger.error(f"Failed to update contract stats: {e}")
+                
+                try:
+                    await on_contract_created(
+                        contract_id=new_contract.id,
+                        contract_data={
+                            "title": new_contract.title,
+                            "value": float(new_contract.value_original) if new_contract.value_original else 0,
+                            "contract_type": new_contract.contract_type.value if new_contract.contract_type else None,
+                            "vendor_name": new_contract.vendor_name,
+                        },
+                        user_id=self.user_id
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to trigger contract agents: {e}")
             
             # Queue OCR processing (import here to avoid circular import)
             from app.tasks.document import process_document_ocr
@@ -117,6 +183,34 @@ class DocumentService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Upload failed: {str(e)}"
             )
+    
+    async def _update_contract_stats(self, db: Session, contract: Contract, user_id: str):
+        """
+        Update contract statistics after contract creation.
+        This updates dashboard stats and other aggregated data.
+        """
+        from app.models.user import UserActivity
+        import uuid
+        
+        # Log activity for stats tracking
+        activity = UserActivity(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            action="contract_created",
+            entity_type="contract",
+            entity_id=contract.id,
+            details={
+                "contract_no": contract.contract_no,
+                "title": contract.title,
+                "value": float(contract.value_original) if contract.value_original else 0,
+                "contract_type": contract.contract_type.value if contract.contract_type else None,
+                "status": contract.status.value if contract.status else None,
+            }
+        )
+        db.add(activity)
+        db.commit()
+        
+        logger.info(f"Updated contract stats for new contract {contract.id}")
     
     def get_document(self, document_id: str) -> ContractAttachment:
         """Get document by ID with presigned URL"""
@@ -241,22 +335,22 @@ class DocumentService:
         ).first()
         
         if not document:
-            return OCRResult(success=False, error_message="Document not found")
-        
+            return OCRResult(success=False, error="Document not found")
+
         try:
             # Update status
             document.ocr_status = "processing"
             self.db.commit()
-            
+
             # Download file
             file_data = self.storage.download_file(document.storage_path)
-            
+
             # Get centralized OCR settings
             ocr_settings_service = get_ocr_settings_service(
-                db=self.db, 
+                db=self.db,
                 user_id=self.user_id
             )
-            
+
             # Validate settings before processing
             validation = ocr_settings_service.validate_settings()
             if not validation["valid"]:
@@ -265,13 +359,24 @@ class DocumentService:
                 document.ocr_status = "failed"
                 document.ocr_error = error_msg
                 self.db.commit()
-                return OCRResult(success=False, error_message=error_msg)
-            
+                return OCRResult(success=False, error=error_msg)
+
             # Log OCR mode being used
+            s = ocr_settings_service.get_settings()
             mode = ocr_settings_service.get_mode()
             engine = ocr_settings_service.get_engine()
             language = ocr_settings_service.get_language()
             logger.info(f"[OCR] Processing document {document_id} with mode={mode}, engine={engine}, lang={language}")
+
+            # Build human-readable engine label and persist it early so frontend can show it
+            if mode == "typhoon":
+                engine_label = f"Typhoon OCR ({s.get('typhoon_model', 'typhoon-ocr')})"
+            elif mode == "custom":
+                cm = s.get("custom_api_model", "")
+                engine_label = f"Custom API ({cm})" if cm else "Custom API"
+            else:
+                engine_label = f"Tesseract ({language})"
+            document.ocr_engine = engine_label
             
             # Process OCR with centralized settings
             ocr_service = OCRService(ocr_settings_service=ocr_settings_service)
@@ -298,20 +403,20 @@ class DocumentService:
             else:
                 document.ocr_status = "failed"
                 document.status = DocumentStatus.OCR_FAILED.value
-                document.ocr_error = result.error_message
-                logger.error(f"OCR failed for document: {document_id} - {result.error_message}")
-            
+                document.ocr_error = result.error
+                logger.error(f"OCR failed for document: {document_id} - {result.error}")
+
             self.db.commit()
             return result
-            
+
         except Exception as e:
             logger.error(f"OCR processing error: {e}")
             document.ocr_status = "failed"
             document.status = DocumentStatus.OCR_FAILED.value
             document.ocr_error = str(e)
             self.db.commit()
-            
-            return OCRResult(success=False, error_message=str(e))
+
+            return OCRResult(success=False, error=str(e))
     
     def verify_document(self, document_id: str, verified_data: dict) -> ContractAttachment:
         """Mark document as verified with corrections"""

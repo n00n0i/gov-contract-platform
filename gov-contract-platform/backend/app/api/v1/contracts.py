@@ -28,14 +28,20 @@ async def list_contracts(
     search: Optional[str] = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    page_size: Optional[int] = Query(None, ge=1, le=100),
     db: Session = Depends(get_db),
     user_payload: dict = Depends(get_current_user_payload)
 ):
     """List contracts with filters - Real Database"""
-    
-    query = db.query(Contract)
-    
-    # Apply filters
+    from app.models.contract import ContractAttachment
+    from sqlalchemy import or_
+
+    effective_limit = page_size or limit
+
+    query = db.query(Contract).filter(
+        or_(Contract.is_deleted == 0, Contract.is_deleted == None)
+    )
+
     if status:
         query = query.filter(Contract.status == status)
     if contract_type:
@@ -49,43 +55,52 @@ async def list_contracts(
             (Contract.contract_no.ilike(search_lower)) |
             (Contract.vendor_name.ilike(search_lower))
         )
-    
-    # Order by created_at desc
+
     query = query.order_by(Contract.created_at.desc())
-    
-    # Pagination
+
     total = query.count()
-    contracts = query.offset((page - 1) * limit).limit(limit).all()
-    
+    contracts = query.offset((page - 1) * effective_limit).limit(effective_limit).all()
+
+    # Batch-load document counts to avoid N+1 queries
+    contract_ids = [c.id for c in contracts]
+    doc_counts: dict = {}
+    if contract_ids:
+        from sqlalchemy import func as sqlfunc
+        rows = db.query(
+            ContractAttachment.contract_id,
+            sqlfunc.count(ContractAttachment.id).label("cnt")
+        ).filter(
+            ContractAttachment.contract_id.in_(contract_ids),
+            ContractAttachment.is_deleted == 0
+        ).group_by(ContractAttachment.contract_id).all()
+        doc_counts = {r.contract_id: r.cnt for r in rows}
+
     return {
         "success": True,
-        "data": [
+        "items": [
             {
                 "id": c.id,
-                "contract_no": c.contract_no,
+                "contract_number": c.contract_no,
                 "title": c.title,
+                "description": c.description,
                 "contract_type": c.contract_type.value if c.contract_type else None,
                 "status": c.status.value if c.status else None,
-                "value": float(c.value_original) if c.value_original else None,
+                "value": float(c.value_original) if c.value_original else 0,
                 "currency": c.currency,
-                "department": c.owner_department.name if c.owner_department else None,
+                "department_name": c.owner_department.name if c.owner_department else None,
                 "vendor_name": c.vendor_name,
                 "vendor_id": c.vendor_id,
                 "start_date": c.start_date.isoformat() if c.start_date else None,
                 "end_date": c.end_date.isoformat() if c.end_date else None,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
-                "created_by": c.created_by,
-                "current_approval_level": c.current_approval_level,
-                "required_approval_level": c.required_approval_level,
+                "document_count": doc_counts.get(c.id, 0),
+                "project_name": c.project_name,
+                "budget_year": c.budget_year,
             }
             for c in contracts
         ],
-        "meta": {
-            "total": total,
-            "page": page,
-            "limit": limit,
-            "pages": (total + limit - 1) // limit
-        }
+        "pages": max(1, (total + effective_limit - 1) // effective_limit),
+        "total": total
     }
 
 
@@ -650,7 +665,7 @@ async def create_contract(
             description=contract_data.get("description"),
             contract_type=ContractType(contract_data.get("contract_type", "procurement")),
             classification=ClassificationLevel(contract_data.get("classification", "S4")),
-            status=ContractStatus.DRAFT,
+            status=ContractStatus(contract_data.get("status", "draft")),
             value_original=contract_data.get("value"),
             currency=contract_data.get("currency", "THB"),
             start_date=contract_data.get("start_date"),
@@ -727,12 +742,27 @@ async def update_contract(
         raise HTTPException(status_code=404, detail="Contract not found")
     
     try:
-        # Update fields
-        for field in ["title", "title_en", "description", "value_original", 
+        # Update simple string/number fields
+        for field in ["title", "title_en", "description", "value_original",
                       "start_date", "end_date", "vendor_id", "vendor_name",
+                      "vendor_tax_id", "vendor_address",
                       "project_code", "project_name", "budget_year", "tags"]:
-            if field in contract_data:
+            if field in contract_data and contract_data[field] is not None:
                 setattr(contract, field, contract_data[field])
+
+        # Update enum fields
+        if "status" in contract_data and contract_data["status"]:
+            try:
+                contract.status = ContractStatus(contract_data["status"])
+            except ValueError:
+                pass
+        if "contract_type" in contract_data and contract_data["contract_type"]:
+            try:
+                contract.contract_type = ContractType(contract_data["contract_type"])
+            except ValueError:
+                pass
+        if "contract_no" in contract_data and contract_data["contract_no"]:
+            contract.contract_no = contract_data["contract_no"]
         
         contract.updated_by = user_id
         contract.updated_at = datetime.utcnow()
@@ -894,16 +924,31 @@ async def approve_contract(
     
     try:
         contract.current_approval_level += 1
-        
+
         # Check if fully approved
         if contract.current_approval_level > contract.required_approval_level:
             contract.status = ContractStatus.ACTIVE
             contract.signed_date = date.today()
-        
+
         contract.updated_by = user_id
         contract.updated_at = datetime.utcnow()
-        
+
         db.commit()
+
+        # Auto-promote draft documents to main when contract becomes ACTIVE
+        if contract.status in (ContractStatus.ACTIVE, ContractStatus.APPROVED):
+            try:
+                from app.models.contract import ContractAttachment
+                db.query(ContractAttachment).filter(
+                    ContractAttachment.contract_id == contract_id,
+                    ContractAttachment.document_type == "contract",
+                    ContractAttachment.is_draft == True,
+                    ContractAttachment.is_deleted == 0,
+                ).update({"is_main_document": True})
+                db.commit()
+                logger.info(f"Auto-promoted draft documents to main for contract {contract_id}")
+            except Exception as e:
+                logger.error(f"Failed to auto-promote documents: {e}")
         
         # Log activity for stats
         try:

@@ -346,6 +346,28 @@ def update_position(
     }
 
 
+@router.delete("/positions/{position_id}")
+def delete_position(
+    position_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Delete position"""
+    position = db.query(Position).filter(Position.id == position_id).first()
+    if not position:
+        raise HTTPException(status_code=404, detail="Position not found")
+
+    if position.users:
+        raise HTTPException(status_code=400, detail="ไม่สามารถลบตำแหน่งที่มีผู้ใช้งานอยู่")
+
+    db.delete(position)
+    db.commit()
+
+    logger.info(f"Deleted position: {position_id}")
+
+    return {"success": True, "message": "Position deleted"}
+
+
 # ============== User Assignment Endpoints ==============
 
 @router.post("/assign-user")

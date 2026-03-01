@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { 
+import {
   Shield, Lock, Bell, Globe, Moon, Sun,
   CheckCircle, AlertTriangle, Save, Eye, EyeOff,
   Smartphone, Mail, User, Server, Database, FileText,
@@ -19,7 +19,7 @@ import {
   getNotificationSettings, saveNotificationSettings,
   getPreferences, savePreferences,
   getOCRSettings, saveOCRSettings,
-  getAISettings, saveAISettings, saveAIFeatures,
+  getAISettings, saveAISettings, saveAIFeatures, setDefaultAIProvider,
   getRagSettings, saveRagSettings,
   getGraphRAGSettings, saveGraphRAGSettings,
   getContractsGraphRAGSettings, saveContractsGraphRAGSettings,
@@ -27,11 +27,12 @@ import {
   getGraphStats, searchGraphEntities,
   checkHealth
 } from '../services/settingsService'
-import { 
-  getTemplates, createTemplate, updateTemplate, deleteTemplate, 
-  setDefaultTemplate, getTemplateTypes, type Template 
+import {
+  getTemplates, getTemplate, createTemplate, updateTemplate, deleteTemplate,
+  setDefaultTemplate, getTemplateTypes, smartImportTemplate, draftContract,
+  type Template
 } from '../services/templateService'
-import { 
+import {
   getAgents, createAgent, updateAgent, deleteAgent, toggleAgent,
   getGlobalConfig, saveGlobalConfig, type Agent,
   getTriggerEvents, getOutputActions, getAgentPages, getAgentModels,
@@ -46,8 +47,10 @@ import TriggerManagement from '../components/TriggerManagement'
 import TriggerPresetSelector from '../components/TriggerPresetSelector'
 import GraphVisualization from '../components/GraphVisualization'
 import CreateTemplate from '../components/CreateTemplate'
+import OrgChart from '../components/OrgChart'
 import {
   getOrgStats, getOrgTree, getPositions, createOrgUnit, createPosition,
+  updateOrgUnit, deleteOrgUnit, updatePosition, deletePosition,
   orgLevelLabels, careerTrackLabels, type OrgUnit, type Position as OrgPosition
 } from '../services/organizationService'
 import {
@@ -165,11 +168,10 @@ function TwoFASettings() {
             <p className="text-sm text-gray-500">เพิ่มความปลอดภัยให้บัญชีของคุณด้วย Authenticator App</p>
           </div>
         </div>
-        <span className={`px-3 py-1 rounded-full text-sm ${
-          status.enabled 
-            ? 'bg-green-100 text-green-700' 
-            : 'bg-gray-100 text-gray-600'
-        }`}>
+        <span className={`px-3 py-1 rounded-full text-sm ${status.enabled
+          ? 'bg-green-100 text-green-700'
+          : 'bg-gray-100 text-gray-600'
+          }`}>
           {status.enabled ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
         </span>
       </div>
@@ -195,7 +197,7 @@ function TwoFASettings() {
           <div>
             <p className="font-medium text-gray-900">ความปลอดภัยของบัญชี</p>
             <p className="text-sm text-gray-500 mt-1">
-              {status.enabled 
+              {status.enabled
                 ? 'บัญชีของคุณได้รับการปกป้องด้วย 2FA คุณจะต้องใส่รหัสจาก Authenticator App ทุกครั้งที่เข้าสู่ระบบ'
                 : 'การเปิดใช้งาน 2FA จะเพิ่มความปลอดภัยโดยต้องใส่รหัสยืนยันจาก Authenticator App นอกจากรหัสผ่านปกติ'
               }
@@ -248,9 +250,9 @@ function TwoFASettings() {
           {/* QR Code */}
           <div className="flex flex-col items-center mb-6">
             <div className="bg-white p-4 rounded-lg shadow-sm">
-              <img 
-                src={setupData.qr_code} 
-                alt="2FA QR Code" 
+              <img
+                src={setupData.qr_code}
+                alt="2FA QR Code"
                 className="w-48 h-48"
               />
             </div>
@@ -369,12 +371,12 @@ interface AIProvider {
   }
 }
 
-function ProviderForm({ 
-  initialData, 
-  onSave, 
+function ProviderForm({
+  initialData,
+  onSave,
   onCancel,
   defaultModelType = 'llm'
-}: { 
+}: {
   initialData: AIProvider | null
   onSave: (provider: AIProvider) => void
   onCancel: () => void
@@ -397,6 +399,8 @@ function ProviderForm({
   const [availableModels, setAvailableModels] = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string; error?: string } | null>(null)
 
   // Default URLs by type
   const defaultUrls: Record<string, string> = {
@@ -410,7 +414,7 @@ function ProviderForm({
   const commonLLMModels: Record<string, string[]> = {
     'ollama': ['llama3.1', 'mistral', 'codellama', 'llama3', 'phi3', 'gemma2', 'qwen2.5'],
     'vllm': ['meta-llama/Llama-3.1-8B-Instruct', 'mistralai/Mistral-7B-Instruct-v0.3'],
-    'openai-compatible': ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo', 'gpt-4o', 'gpt-4o-mini']
+    'openai-compatible': ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo']
   }
 
   // Common models for Embedding
@@ -444,8 +448,8 @@ function ProviderForm({
     if (providerType === 'openai-compatible') {
       if (modelType === 'embedding') {
         // OpenAI embedding models
-        return models.filter(m => 
-          m.includes('embedding') || 
+        return models.filter(m =>
+          m.includes('embedding') ||
           m.includes('text-embedding-3') ||
           m.includes('text-embedding-ada')
         )
@@ -454,21 +458,21 @@ function ProviderForm({
         return models.filter(m => !m.includes('embedding'))
       }
     }
-    
+
     // Ollama and other providers
     const embeddingPatterns = [
       'embed', 'embedding', 'bge-', 'e5-', 'gte-', 'jina-embed',
       'nomic-embed', 'mxbai-embed', 'snowflake-arctic-embed',
       'multilingual-e5', 'all-minilm'
     ]
-    
+
     const visionPatterns = ['vision', 'vl-', 'mm-', 'multimodal', 'llava']
-    
+
     return models.filter(model => {
       const lowerModel = model.toLowerCase()
       const isEmbedding = embeddingPatterns.some(p => lowerModel.includes(p))
       const isVision = visionPatterns.some(p => lowerModel.includes(p))
-      
+
       if (modelType === 'embedding') {
         return isEmbedding
       } else {
@@ -488,45 +492,27 @@ function ProviderForm({
     setFetchError(null)
 
     try {
-      let models: string[] = []
+      const response = await api.post('/settings/ai/fetch-models', {
+        type: formData.type,
+        url: formData.url,
+        api_key: formData.apiKey
+      })
 
-      if (formData.type === 'ollama') {
-        // Ollama: GET /api/tags
-        const response = await fetch(`${formData.url.replace(/\/$/, '')}/api/tags`)
-        if (response.ok) {
-          const data = await response.json()
-          models = data.models?.map((m: any) => m.name) || []
-        }
-      } else if (formData.type === 'openai-compatible' || formData.type === 'vllm') {
-        // OpenAI/vLLM: GET /v1/models
-        const headers: Record<string, string> = {}
-        if (formData.apiKey) {
-          headers['Authorization'] = `Bearer ${formData.apiKey}`
-        }
-        const response = await fetch(`${formData.url.replace(/\/$/, '')}/v1/models`, { headers })
-        if (response.ok) {
-          const data = await response.json()
-          models = data.data?.map((m: any) => m.id) || []
-        }
-      }
+      const models: string[] = response.data?.models || []
 
       if (models.length > 0) {
-        // Filter models by selected type
         const filteredModels = filterModelsByType(models, formData.modelType, formData.type)
-        
+
         if (filteredModels.length > 0) {
           setAvailableModels(filteredModels)
-          // Auto-select first model if none selected
           if (!formData.model && filteredModels.length > 0) {
             setFormData(prev => ({ ...prev, model: filteredModels[0] }))
           }
         } else {
-          // No matching models found, use common models
           setAvailableModels(getCommonModels())
           setFetchError(`ไม่พบ ${formData.modelType === 'embedding' ? 'Embedding' : 'LLM'} Models จาก Endpoint ใช้รายการทั่วไปแทน`)
         }
       } else {
-        // Fallback to common models
         setAvailableModels(getCommonModels())
         setFetchError('ไม่พบรายการ Models จาก Endpoint ใช้รายการทั่วไปแทน')
       }
@@ -561,11 +547,10 @@ function ProviderForm({
               key={type.value}
               type="button"
               onClick={() => handleTypeChange(type.value as AIProvider['type'])}
-              className={`p-3 rounded-lg border-2 text-left transition ${
-                formData.type === type.value
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
+              className={`p-3 rounded-lg border-2 text-left transition ${formData.type === type.value
+                ? 'border-blue-500 bg-blue-50'
+                : 'border-gray-200 hover:border-gray-300'
+                }`}
             >
               <p className="font-medium text-gray-900">{type.label}</p>
               <p className="text-xs text-gray-500">{type.desc}</p>
@@ -582,24 +567,22 @@ function ProviderForm({
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
-            onClick={() => setFormData({...formData, modelType: 'llm'})}
-            className={`p-3 rounded-lg border-2 text-left transition ${
-              formData.modelType === 'llm'
-                ? 'border-blue-500 bg-blue-50'
-                : 'border-gray-200 hover:border-gray-300'
-            }`}
+            onClick={() => setFormData({ ...formData, modelType: 'llm' })}
+            className={`p-3 rounded-lg border-2 text-left transition ${formData.modelType === 'llm'
+              ? 'border-blue-500 bg-blue-50'
+              : 'border-gray-200 hover:border-gray-300'
+              }`}
           >
             <p className="font-medium text-gray-900">LLM (Language Model)</p>
             <p className="text-xs text-gray-500">สำหรับสร้างข้อความ ตอบคำถาม</p>
           </button>
           <button
             type="button"
-            onClick={() => setFormData({...formData, modelType: 'embedding'})}
-            className={`p-3 rounded-lg border-2 text-left transition ${
-              formData.modelType === 'embedding'
-                ? 'border-purple-500 bg-purple-50'
-                : 'border-gray-200 hover:border-gray-300'
-            }`}
+            onClick={() => setFormData({ ...formData, modelType: 'embedding' })}
+            className={`p-3 rounded-lg border-2 text-left transition ${formData.modelType === 'embedding'
+              ? 'border-purple-500 bg-purple-50'
+              : 'border-gray-200 hover:border-gray-300'
+              }`}
           >
             <p className="font-medium text-gray-900">Embedding Model</p>
             <p className="text-xs text-gray-500">สำหรับ RAG / Vector Search</p>
@@ -616,7 +599,7 @@ function ProviderForm({
           type="text"
           required
           value={formData.name}
-          onChange={(e) => setFormData({...formData, name: e.target.value})}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           placeholder="e.g., Local Ollama, OpenAI GPT-4"
           className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
@@ -631,7 +614,7 @@ function ProviderForm({
           type="url"
           required
           value={formData.url}
-          onChange={(e) => setFormData({...formData, url: e.target.value})}
+          onChange={(e) => setFormData({ ...formData, url: e.target.value })}
           placeholder={defaultUrls[formData.type]}
           className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
@@ -651,7 +634,7 @@ function ProviderForm({
           <input
             type={showKey ? 'text' : 'password'}
             value={formData.apiKey}
-            onChange={(e) => setFormData({...formData, apiKey: e.target.value})}
+            onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
             placeholder={formData.type === 'ollama' ? 'Optional (usually empty for local)' : 'sk-...'}
             className="w-full px-4 py-2 pr-20 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
@@ -676,7 +659,7 @@ function ProviderForm({
           <select
             required
             value={formData.model}
-            onChange={(e) => setFormData({...formData, model: e.target.value})}
+            onChange={(e) => setFormData({ ...formData, model: e.target.value })}
             className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">-- เลือก Model --</option>
@@ -719,7 +702,7 @@ function ProviderForm({
           max="1"
           step="0.1"
           value={formData.temperature}
-          onChange={(e) => setFormData({...formData, temperature: parseFloat(e.target.value)})}
+          onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
           className="w-full"
         />
         <div className="flex justify-between text-xs text-gray-500">
@@ -736,7 +719,7 @@ function ProviderForm({
           </label>
           <select
             value={formData.maxTokens}
-            onChange={(e) => setFormData({...formData, maxTokens: parseInt(e.target.value)})}
+            onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) })}
             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value={1024}>1,024</option>
@@ -766,7 +749,7 @@ function ProviderForm({
               type="checkbox"
               id="supportsGraphRAG"
               checked={formData.supportsGraphRAG}
-              onChange={(e) => setFormData({...formData, supportsGraphRAG: e.target.checked})}
+              onChange={(e) => setFormData({ ...formData, supportsGraphRAG: e.target.checked })}
               className="w-4 h-4 text-blue-600 rounded"
             />
             <label htmlFor="supportsGraphRAG" className="font-medium text-gray-700">
@@ -814,6 +797,66 @@ function ProviderForm({
         </div>
       )}
 
+      {/* Test Connection Button */}
+      <button
+        type="button"
+        onClick={async () => {
+          setTesting(true)
+          setTestResult(null)
+
+          try {
+            const response = await api.post('/settings/ai/test-connection', {
+              type: formData.type,
+              url: formData.url,
+              api_key: formData.apiKey
+            })
+            if (response.data?.success) {
+              setTestResult({ success: true, message: response.data.message })
+            } else {
+              setTestResult({
+                success: false,
+                message: response.data?.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ',
+                error: 'กรุณาตรวจสอบ URL และ API Key'
+              })
+            }
+          } catch (error: any) {
+            setTestResult({
+              success: false,
+              message: 'เกิดข้อผิดพลาดในการเชื่อมต่อ',
+              error: error.response?.data?.message || error.message || 'กรุณาลองใหม่อีกครั้ง'
+            })
+          } finally {
+            setTesting(false)
+          }
+        }}
+        disabled={testing || !formData.url}
+        className="w-full mt-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+      >
+        {testing ? (
+          <span className="flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            กำลังทดสอบ...
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <Activity className="w-4 h-4" />
+            ทดสอบการเชื่อมต่อ
+          </span>
+        )}
+      </button>
+      {/* Test Result */}
+      {testResult && (
+        <div className={`mt-4 p-4 rounded-lg ${testResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+          <div className="flex items-center gap-2">
+            {testResult.success ? <CheckCircle className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+            <div>
+              <p className="font-medium">{testResult.message}</p>
+              {testResult.error && <p className="text-sm mt-1">{testResult.error}</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Buttons */}
       <div className="flex gap-3 pt-4">
         <button
@@ -841,7 +884,7 @@ export default function Settings() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [health, setHealth] = useState<HealthStatus | null>(null)
 
   // OCR Test State
@@ -899,7 +942,7 @@ export default function Settings() {
       display_density: savedDensity || 'normal'
     }
   }
-  
+
   const [preferences, setPreferences] = useState(getInitialPreferences())
 
   // OCR Settings
@@ -951,12 +994,12 @@ export default function Settings() {
   const [aiProviders, setAiProviders] = useState<AIProvider[]>([
     {
       id: 'default-llm',
-      name: 'Local Ollama (LLM)',
-      type: 'ollama',
+      name: 'OpenAI (LLM)',
+      type: 'openai-compatible',
       modelType: 'llm',
-      url: 'http://localhost:11434',
+      url: 'https://api.openai.com/v1',
       apiKey: '',
-      model: 'llama3.1',
+      model: 'gpt-4o-mini',
       temperature: 0.7,
       maxTokens: 2048,
       supportsGraphRAG: false
@@ -1007,11 +1050,11 @@ export default function Settings() {
   const [outputActions, setOutputActions] = useState<any[]>([])
   const [agentPages, setAgentPages] = useState<any[]>([])
   const [agentModels, setAgentModels] = useState<any[]>([])
-  
+
   // Agent Triggers (Legacy - will be replaced by presets)
   const [agentTriggers, setAgentTriggers] = useState<Record<string, any[]>>({})
   const [managingTriggersFor, setManagingTriggersFor] = useState<Agent | null>(null)
-  
+
   // Trigger Presets (NEW)
   const [triggerPresets, setTriggerPresets] = useState<any[]>([])
   const [triggerPresetCategories, setTriggerPresetCategories] = useState<any[]>([])
@@ -1024,9 +1067,24 @@ export default function Settings() {
   // Template Content Data (for preview)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
-  
+
   // Create Template Modal
   const [showCreateTemplate, setShowCreateTemplate] = useState(false)
+
+  // Smart Import Modal
+  const [showSmartImport, setShowSmartImport] = useState(false)
+  const [smartImportText, setSmartImportText] = useState('')
+  const [smartImportLoading, setSmartImportLoading] = useState(false)
+
+  // Draft Contract Modal
+  const [showDraftModal, setShowDraftModal] = useState(false)
+  const [draftTemplate, setDraftTemplate] = useState<Template | null>(null)
+  const [draftVarValues, setDraftVarValues] = useState<Record<string, string>>({})
+  const [draftConditionals, setDraftConditionals] = useState<Record<string, string>>({})
+  const [draftOptional, setDraftOptional] = useState<Record<string, boolean>>({})
+  const [draftLoading, setDraftLoading] = useState(false)
+  const [draftFetching, setDraftFetching] = useState(false)
+  const [draftResult, setDraftResult] = useState<string | null>(null)
 
   // RAG Settings
   const [ragSettings, setRagSettings] = useState({
@@ -1075,8 +1133,15 @@ export default function Settings() {
   const [orgLoading, setOrgLoading] = useState(false)
   const [showOrgUnitForm, setShowOrgUnitForm] = useState(false)
   const [newOrgUnitForm, setNewOrgUnitForm] = useState({ code: '', name_th: '', name_en: '', level: 'bureau' as string, parent_id: '' })
+  const [orgViewMode, setOrgViewMode] = useState<'tree' | 'chart'>('tree')
+  const [editingOrgUnit, setEditingOrgUnit] = useState<OrgUnit | null>(null)
+  const [editOrgUnitForm, setEditOrgUnitForm] = useState({ name_th: '', name_en: '', level: 'bureau', parent_id: '', director_name: '', director_position: '', is_active: true })
+  const [deleteOrgUnitId, setDeleteOrgUnitId] = useState<string | null>(null)
+  const [editingPosition, setEditingPosition] = useState<OrgPosition | null>(null)
+  const [editPositionForm, setEditPositionForm] = useState({ name_th: '', name_en: '', level: 3, career_track: 'support', is_management: false, is_active: true, org_unit_id: '' })
+  const [deletePositionId, setDeletePositionId] = useState<string | null>(null)
   const [showPositionForm, setShowPositionForm] = useState(false)
-  const [newPositionForm, setNewPositionForm] = useState({ code: '', name_th: '', name_en: '', level: 3, position_type: 'permanent', career_track: 'support', is_management: false })
+  const [newPositionForm, setNewPositionForm] = useState({ code: '', name_th: '', name_en: '', level: 3, position_type: 'permanent', career_track: 'support', is_management: false, org_unit_id: '' })
 
   // User Management State
   const [userList, setUserList] = useState<UserItem[]>([])
@@ -1111,12 +1176,12 @@ export default function Settings() {
     } else {
       document.documentElement.classList.remove('dark')
     }
-    
+
     const savedDensity = localStorage.getItem('display_density')
     if (savedDensity) {
       document.documentElement.setAttribute('data-density', savedDensity)
     }
-    
+
     const savedLanguage = localStorage.getItem('language')
     if (savedLanguage) {
       document.documentElement.lang = savedLanguage
@@ -1158,7 +1223,7 @@ export default function Settings() {
       console.error('Failed to fetch templates:', err)
     }
   }
-  
+
   const handleTemplateSuccess = () => {
     setShowCreateTemplate(false)
     fetchTemplates()
@@ -1179,13 +1244,13 @@ export default function Settings() {
         getAgentModels(),
         getGlobalConfig()
       ])
-      
+
       const [agentsRes, kbsRes, eventsRes, typesRes, templatesRes, presetsRes, actionsRes, pagesRes, modelsRes, configRes] = results
-      
+
       // Handle each result individually
       if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value)
       if (kbsRes.status === 'fulfilled') setKnowledgeBases(kbsRes.value)
-      
+
       if (presetsRes.status === 'fulfilled' && presetsRes.value?.data) {
         const mappedPresets = presetsRes.value.data.map((p: any) => ({
           value: p.id,
@@ -1202,13 +1267,13 @@ export default function Settings() {
         console.error('Failed to fetch trigger presets:', presetsRes)
         setTriggerEvents([])
       }
-      
+
       if (typesRes.status === 'fulfilled') setTriggerTypes(typesRes.value)
       if (templatesRes.status === 'fulfilled') setTriggerTemplates(templatesRes.value)
       if (actionsRes.status === 'fulfilled') setOutputActions(actionsRes.value)
       if (pagesRes.status === 'fulfilled') setAgentPages(pagesRes.value)
       if (modelsRes.status === 'fulfilled') setAgentModels(modelsRes.value)
-      
+
       if (configRes.status === 'fulfilled' && configRes.value) {
         setAgentGlobalConfig({
           auto_execute: configRes.value.auto_execute ?? false,
@@ -1216,7 +1281,7 @@ export default function Settings() {
           notification_on_complete: configRes.value.notification_on_complete ?? true
         })
       }
-      
+
       // Fetch triggers for each agent
       const triggersMap: Record<string, any[]> = {}
       if (agentsRes.status === 'fulfilled' && agentsRes.value) {
@@ -1274,11 +1339,76 @@ export default function Settings() {
     }
   }
 
+  const handleSmartImport = async () => {
+    if (!smartImportText.trim()) return
+    setSmartImportLoading(true)
+    try {
+      const res = await smartImportTemplate(smartImportText.trim())
+      if (res.success) {
+        setMessage({ type: 'success', text: res.message || 'นำเข้า Template สำเร็จ' })
+        setShowSmartImport(false)
+        setSmartImportText('')
+        fetchTemplates()
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถนำเข้าได้' })
+    } finally {
+      setSmartImportLoading(false)
+    }
+  }
+
+  const openDraftModal = async (template: Template) => {
+    setDraftResult(null)
+    setDraftTemplate(template)
+    setDraftVarValues({})
+    setDraftConditionals({})
+    setDraftOptional({})
+    setShowDraftModal(true)
+    setDraftFetching(true)
+    try {
+      // Fetch full template (includes clauses_data with optional/conditional flags)
+      const full = await getTemplate(template.id)
+      const t = full || template
+      setDraftTemplate(t)
+      const vars: Record<string, string> = {}
+      ;(t.variables || []).forEach(v => { vars[v.key] = v.default || '' })
+      setDraftVarValues(vars)
+      const conds: Record<string, string> = {}
+      ;(t.conditionalGroups || []).forEach(g => { conds[g.key] = g.default || g.options[0]?.value || '' })
+      setDraftConditionals(conds)
+    } catch {
+      // Fallback to list data
+      const vars: Record<string, string> = {}
+      ;(template.variables || []).forEach(v => { vars[v.key] = v.default || '' })
+      setDraftVarValues(vars)
+      const conds: Record<string, string> = {}
+      ;(template.conditionalGroups || []).forEach(g => { conds[g.key] = g.default || g.options[0]?.value || '' })
+      setDraftConditionals(conds)
+    } finally {
+      setDraftFetching(false)
+    }
+  }
+
+  const handleDraftContract = async () => {
+    if (!draftTemplate) return
+    setDraftLoading(true)
+    try {
+      const res = await draftContract(draftTemplate.id, draftVarValues, draftConditionals, draftOptional)
+      if (res.success) {
+        setDraftResult(res.data.contract_text)
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถร่างสัญญาได้' })
+    } finally {
+      setDraftLoading(false)
+    }
+  }
+
   // Agent handlers
   const handleToggleAgent = async (id: string) => {
     try {
       await toggleAgent(id)
-      setAgents(prev => prev.map(a => 
+      setAgents(prev => prev.map(a =>
         a.id === id ? { ...a, status: a.status === 'active' ? 'paused' : 'active' } : a
       ))
     } catch (err: any) {
@@ -1418,21 +1548,21 @@ export default function Settings() {
       // Load preferences
       const prefs = await getPreferences()
       if (prefs) {
-        setPreferences(prev => ({...prev, ...prefs}))
+        setPreferences(prev => ({ ...prev, ...prefs }))
       }
-      
+
       // Load notifications
       const notifs = await getNotificationSettings()
       if (notifs) {
-        setNotifications(prev => ({...prev, ...notifs}))
+        setNotifications(prev => ({ ...prev, ...notifs }))
       }
-      
+
       // Load OCR settings
       const ocr = await getOCRSettings()
       if (ocr) {
-        setOcrSettings(prev => ({...prev, ...ocr}))
+        setOcrSettings(prev => ({ ...prev, ...ocr }))
       }
-      
+
       // Load AI settings
       const ai = await getAISettings()
       if (ai) {
@@ -1442,7 +1572,7 @@ export default function Settings() {
           setActiveEmbeddingId(ai.activeEmbeddingId)
           setRagSettings(prev => ({ ...prev, embeddingProviderId: ai.activeEmbeddingId }))
         }
-        if (ai.features) setAiFeatures(prev => ({...prev, ...ai.features}))
+        if (ai.features) setAiFeatures(prev => ({ ...prev, ...ai.features }))
       }
 
       // Load RAG settings
@@ -1558,6 +1688,98 @@ export default function Settings() {
     }
   }
 
+  const flattenOrgTree = (nodes: OrgUnit[]): OrgUnit[] => {
+    const result: OrgUnit[] = []
+    const walk = (items: OrgUnit[]) => {
+      for (const item of items) {
+        result.push(item)
+        if (item.children?.length) walk(item.children)
+      }
+    }
+    walk(nodes)
+    return result
+  }
+
+  const handleOpenEditOrgUnit = (unit: OrgUnit) => {
+    setEditingOrgUnit(unit)
+    setEditOrgUnitForm({
+      name_th: unit.name_th,
+      name_en: unit.name_en || '',
+      level: unit.level,
+      parent_id: unit.parent_id || '',
+      director_name: unit.director_name || '',
+      director_position: unit.director_position || '',
+      is_active: unit.is_active,
+    })
+  }
+
+  const handleUpdateOrgUnit = async () => {
+    if (!editingOrgUnit) return
+    setSaving(true)
+    try {
+      await updateOrgUnit(editingOrgUnit.id, editOrgUnitForm as any)
+      setEditingOrgUnit(null)
+      await fetchOrgData()
+      setMessage({ type: 'success', text: 'แก้ไขหน่วยงานสำเร็จ' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถแก้ไขได้' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteOrgUnit = async (id: string) => {
+    try {
+      await deleteOrgUnit(id)
+      setDeleteOrgUnitId(null)
+      await fetchOrgData()
+      setMessage({ type: 'success', text: 'ลบหน่วยงานสำเร็จ' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถลบได้' })
+      setDeleteOrgUnitId(null)
+    }
+  }
+
+  const handleOpenEditPosition = (pos: OrgPosition) => {
+    setEditingPosition(pos)
+    setEditPositionForm({
+      name_th: pos.name_th,
+      name_en: pos.name_en || '',
+      level: pos.level,
+      career_track: pos.career_track || 'support',
+      is_management: pos.is_management,
+      is_active: pos.is_active,
+      org_unit_id: pos.org_unit_id || '',
+    })
+  }
+
+  const handleUpdatePosition = async () => {
+    if (!editingPosition) return
+    setSaving(true)
+    try {
+      await updatePosition(editingPosition.id, editPositionForm as any)
+      setEditingPosition(null)
+      await fetchOrgData()
+      setMessage({ type: 'success', text: 'แก้ไขตำแหน่งสำเร็จ' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถแก้ไขได้' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeletePosition = async (id: string) => {
+    try {
+      await deletePosition(id)
+      setDeletePositionId(null)
+      await fetchOrgData()
+      setMessage({ type: 'success', text: 'ลบตำแหน่งสำเร็จ' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถลบได้' })
+      setDeletePositionId(null)
+    }
+  }
+
   const handleCreateOrgUnit = async () => {
     if (!newOrgUnitForm.code || !newOrgUnitForm.name_th) {
       setMessage({ type: 'error', text: 'กรุณากรอกรหัสและชื่อหน่วยงาน' })
@@ -1586,7 +1808,7 @@ export default function Settings() {
     try {
       await createPosition(newPositionForm as any)
       setShowPositionForm(false)
-      setNewPositionForm({ code: '', name_th: '', name_en: '', level: 3, position_type: 'permanent', career_track: 'support', is_management: false })
+      setNewPositionForm({ code: '', name_th: '', name_en: '', level: 3, position_type: 'permanent', career_track: 'support', is_management: false, org_unit_id: '' })
       await fetchOrgData()
       setMessage({ type: 'success', text: 'เพิ่มตำแหน่งสำเร็จ' })
     } catch (err: any) {
@@ -1647,9 +1869,9 @@ export default function Settings() {
       setMessage({ type: 'success', text: 'เปลี่ยนรหัสผ่านสำเร็จ' })
       setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
     } catch (err: any) {
-      setMessage({ 
-        type: 'error', 
-        text: err.response?.data?.detail || 'ไม่สามารถเปลี่ยนรหัสผ่านได้' 
+      setMessage({
+        type: 'error',
+        text: err.response?.data?.detail || 'ไม่สามารถเปลี่ยนรหัสผ่านได้'
       })
     } finally {
       setSaving(false)
@@ -1701,17 +1923,17 @@ export default function Settings() {
     if (file) {
       const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/tiff']
       const maxSize = 10 * 1024 * 1024 // 10MB
-      
+
       if (!validTypes.includes(file.type)) {
         setMessage({ type: 'error', text: 'ไฟล์ไม่รองรับ กรุณาอัพโหลด PDF, PNG, JPG หรือ TIFF' })
         return
       }
-      
+
       if (file.size > maxSize) {
         setMessage({ type: 'error', text: 'ไฟล์ใหญ่เกินไป (สูงสุด 10MB)' })
         return
       }
-      
+
       setOcrTestFile(file)
       setMessage(null)
     }
@@ -1723,17 +1945,17 @@ export default function Settings() {
     if (file) {
       const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/tiff']
       const maxSize = 10 * 1024 * 1024
-      
+
       if (!validTypes.includes(file.type)) {
         setMessage({ type: 'error', text: 'ไฟล์ไม่รองรับ กรุณาอัพโหลด PDF, PNG, JPG หรือ TIFF' })
         return
       }
-      
+
       if (file.size > maxSize) {
         setMessage({ type: 'error', text: 'ไฟล์ใหญ่เกินไป (สูงสุด 10MB)' })
         return
       }
-      
+
       setOcrTestFile(file)
       setMessage(null)
     }
@@ -1767,9 +1989,9 @@ export default function Settings() {
       }
     } catch (err: any) {
       console.error('OCR Error:', err)
-      setMessage({ 
-        type: 'error', 
-        text: err.response?.data?.detail || 'OCR ล้มเหลว กรุณาลองใหม่' 
+      setMessage({
+        type: 'error',
+        text: err.response?.data?.detail || 'OCR ล้มเหลว กรุณาลองใหม่'
       })
     } finally {
       setOcrTestLoading(false)
@@ -1805,9 +2027,9 @@ export default function Settings() {
       }
     } catch (err: any) {
       console.error('OCR Error:', err)
-      setMessage({ 
-        type: 'error', 
-        text: err.response?.data?.detail || 'OCR ล้มเหลว กรุณาตรวจสอบการตั้งค่า' 
+      setMessage({
+        type: 'error',
+        text: err.response?.data?.detail || 'OCR ล้มเหลว กรุณาตรวจสอบการตั้งค่า'
       })
     } finally {
       setOcrTestLoading(false)
@@ -1826,12 +2048,26 @@ export default function Settings() {
       })
       setMessage({ type: 'success', text: 'บันทึกการตั้งค่า AI สำเร็จ' })
     } catch (err: any) {
-      setMessage({ 
-        type: 'error', 
+      setMessage({
+        type: 'error',
         text: err.response?.data?.detail || 'ไม่สามารถบันทึกได้'
       })
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleSetDefaultProvider = async (provider: { id: string; modelType: string }) => {
+    try {
+      await setDefaultAIProvider(provider.id)
+      if (provider.modelType === 'llm') {
+        setActiveLLMId(provider.id)
+      } else {
+        setActiveEmbeddingId(provider.id)
+      }
+      setMessage({ type: 'success', text: 'ตั้งค่า default provider เรียบร้อย' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'ไม่สามารถตั้งค่าได้' })
     }
   }
 
@@ -1842,12 +2078,36 @@ export default function Settings() {
       await saveAIFeatures(aiFeatures)
       setMessage({ type: 'success', text: 'บันทึกการตั้งค่า AI Features สำเร็จ' })
     } catch (err: any) {
-      setMessage({ 
-        type: 'error', 
+      setMessage({
+        type: 'error',
         text: err.response?.data?.detail || 'ไม่สามารถบันทึกได้'
       })
     } finally {
       setSaving(false)
+    }
+  }
+
+  const testProviderConnection = async (provider: AIProvider) => {
+    setMessage(null)
+    try {
+      const response = await api.post(`/settings/ai/providers/${provider.id}/test`)
+      if (response.data?.success) {
+        setMessage({
+          type: 'success',
+          text: response.data.message
+        })
+      } else {
+        setMessage({
+          type: 'error',
+          text: response.data?.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ'
+        })
+      }
+    } catch (error: any) {
+      console.error('Test connection error:', error)
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.detail || 'เกิดข้อผิดพลาดในการเชื่อมต่อ'
+      })
     }
   }
 
@@ -1886,27 +2146,24 @@ export default function Settings() {
               <p className="px-3 pt-2 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.personal')}</p>
               <button
                 onClick={() => setActiveTab('security')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'security' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'security' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Shield className="w-4 h-4" />
                 <span className="text-sm font-medium">{t('settings.security')}</span>
               </button>
               <button
                 onClick={() => setActiveTab('notifications')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'notifications' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'notifications' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Bell className="w-4 h-4" />
                 <span className="text-sm font-medium">{t('settings.notifications')}</span>
               </button>
               <button
                 onClick={() => setActiveTab('preferences')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'preferences' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'preferences' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Globe className="w-4 h-4" />
                 <span className="text-sm font-medium">{t('settings.general')}</span>
@@ -1916,9 +2173,8 @@ export default function Settings() {
               <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.contracts')}</p>
               <button
                 onClick={() => setActiveTab('templates')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'templates' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'templates' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <FileStack className="w-4 h-4" />
                 <span className="text-sm font-medium">{t('settings.templates')}</span>
@@ -1928,45 +2184,40 @@ export default function Settings() {
               <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.ai_automation')}</p>
               <button
                 onClick={() => setActiveTab('ai')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'ai' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'ai' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Brain className="w-4 h-4" />
                 <span className="text-sm font-medium">AI Models</span>
               </button>
               <button
                 onClick={() => setActiveTab('ai-features')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'ai-features' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'ai-features' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Sparkles className="w-4 h-4" />
                 <span className="text-sm font-medium">AI Features</span>
               </button>
               <button
                 onClick={() => setActiveTab('agents')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'agents' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'agents' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Bot className="w-4 h-4" />
                 <span className="text-sm font-medium">Agents</span>
               </button>
               <button
                 onClick={() => setActiveTab('knowledge')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'knowledge' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'knowledge' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <BookOpen className="w-4 h-4" />
                 <span className="text-sm font-medium">Knowledge Base (RAG)</span>
               </button>
               <button
                 onClick={() => { setActiveTab('graphrag'); fetchGraphStats() }}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'graphrag' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'graphrag' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Workflow className="w-4 h-4" />
                 <span className="text-sm font-medium">GraphRAG</span>
@@ -1976,27 +2227,24 @@ export default function Settings() {
               <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.system')}</p>
               <button
                 onClick={() => setActiveTab('ocr')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'ocr' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'ocr' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <ScanLine className="w-4 h-4" />
                 <span className="text-sm font-medium">OCR</span>
               </button>
               <button
                 onClick={() => setActiveTab('system')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'system' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'system' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Server className="w-4 h-4" />
                 <span className="text-sm font-medium">{t('settings.server_api')}</span>
               </button>
               <button
                 onClick={() => setActiveTab('storage')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'storage' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'storage' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <HardDrive className="w-4 h-4" />
                 <span className="text-sm font-medium">{t('settings.storage')}</span>
@@ -2006,18 +2254,16 @@ export default function Settings() {
               <p className="px-3 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{t('settings.management')}</p>
               <button
                 onClick={() => setActiveTab('org-structure')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'org-structure' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'org-structure' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Building2 className="w-4 h-4" />
                 <span className="text-sm font-medium">{t('settings.org_structure')}</span>
               </button>
               <button
                 onClick={() => setActiveTab('users')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${
-                  activeTab === 'users' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-left ${activeTab === 'users' ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                  }`}
               >
                 <Users className="w-4 h-4" />
                 <span className="text-sm font-medium">{t('settings.user_management')}</span>
@@ -2094,7 +2340,7 @@ export default function Settings() {
                     <Lock className="w-6 h-6 text-blue-600" />
                     <h2 className="text-lg font-semibold text-gray-900">เปลี่ยนรหัสผ่าน</h2>
                   </div>
-                  
+
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2104,12 +2350,12 @@ export default function Settings() {
                         <input
                           type={showPassword.current ? 'text' : 'password'}
                           value={passwordForm.current_password}
-                          onChange={(e) => setPasswordForm({...passwordForm, current_password: e.target.value})}
+                          onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
                           className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
                         />
                         <button
                           type="button"
-                          onClick={() => setShowPassword({...showPassword, current: !showPassword.current})}
+                          onClick={() => setShowPassword({ ...showPassword, current: !showPassword.current })}
                           className="absolute right-3 top-1/2 -translate-y-1/2"
                         >
                           {showPassword.current ? <EyeOff className="w-5 h-5 text-gray-400" /> : <Eye className="w-5 h-5 text-gray-400" />}
@@ -2125,12 +2371,12 @@ export default function Settings() {
                         <input
                           type={showPassword.new ? 'text' : 'password'}
                           value={passwordForm.new_password}
-                          onChange={(e) => setPasswordForm({...passwordForm, new_password: e.target.value})}
+                          onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
                           className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
                         />
                         <button
                           type="button"
-                          onClick={() => setShowPassword({...showPassword, new: !showPassword.new})}
+                          onClick={() => setShowPassword({ ...showPassword, new: !showPassword.new })}
                           className="absolute right-3 top-1/2 -translate-y-1/2"
                         >
                           {showPassword.new ? <EyeOff className="w-5 h-5 text-gray-400" /> : <Eye className="w-5 h-5 text-gray-400" />}
@@ -2147,12 +2393,12 @@ export default function Settings() {
                         <input
                           type={showPassword.confirm ? 'text' : 'password'}
                           value={passwordForm.confirm_password}
-                          onChange={(e) => setPasswordForm({...passwordForm, confirm_password: e.target.value})}
+                          onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
                           className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
                         />
                         <button
                           type="button"
-                          onClick={() => setShowPassword({...showPassword, confirm: !showPassword.confirm})}
+                          onClick={() => setShowPassword({ ...showPassword, confirm: !showPassword.confirm })}
                           className="absolute right-3 top-1/2 -translate-y-1/2"
                         >
                           {showPassword.confirm ? <EyeOff className="w-5 h-5 text-gray-400" /> : <Eye className="w-5 h-5 text-gray-400" />}
@@ -2196,22 +2442,20 @@ export default function Settings() {
                       <div className="flex gap-3">
                         <button
                           onClick={() => setPreferences({ ...preferences, calendar_system: 'buddhist' })}
-                          className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-center transition ${
-                            preferences.calendar_system === 'buddhist' 
-                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
-                              : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
-                          }`}
+                          className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-center transition ${preferences.calendar_system === 'buddhist'
+                            ? 'border-blue-500 bg-blue-50 text-blue-700'
+                            : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+                            }`}
                         >
                           <p className="font-medium text-sm">{t('date.calendar.buddhist')}</p>
                           <p className="text-xs text-gray-400">{t('date.calendar.buddhist_year')} 2568</p>
                         </button>
                         <button
                           onClick={() => setPreferences({ ...preferences, calendar_system: 'gregorian' })}
-                          className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-center transition ${
-                            preferences.calendar_system === 'gregorian' 
-                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
-                              : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
-                          }`}
+                          className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-center transition ${preferences.calendar_system === 'gregorian'
+                            ? 'border-blue-500 bg-blue-50 text-blue-700'
+                            : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+                            }`}
                         >
                           <p className="font-medium text-sm">{t('date.calendar.gregorian')}</p>
                           <p className="text-xs text-gray-400">{t('date.calendar.gregorian_year')} 2025</p>
@@ -2271,11 +2515,10 @@ export default function Settings() {
                         <button
                           key={value}
                           onClick={() => setPreferences({ ...preferences, default_page: value })}
-                          className={`flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition ${
-                            preferences.default_page === value 
-                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
-                              : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 text-gray-600 dark:text-gray-300'
-                          }`}
+                          className={`flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition ${preferences.default_page === value
+                            ? 'border-blue-500 bg-blue-50 text-blue-700'
+                            : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 text-gray-600 dark:text-gray-300'
+                            }`}
                         >
                           <Icon className="w-4 h-4" />
                           <span className="font-medium text-sm">{label}</span>
@@ -2309,7 +2552,7 @@ export default function Settings() {
                     สถานะระบบ
                   </h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <StatusCard 
+                    <StatusCard
                       icon={<Server className="w-6 h-6 text-blue-600" />}
                       title="Backend API"
                       value={health?.version || '-'}
@@ -2317,7 +2560,7 @@ export default function Settings() {
                       color="blue"
                       status={health ? 'online' : 'offline'}
                     />
-                    <StatusCard 
+                    <StatusCard
                       icon={<Database className="w-6 h-6 text-green-600" />}
                       title="Database"
                       value="PostgreSQL"
@@ -2325,7 +2568,7 @@ export default function Settings() {
                       color="green"
                       status="online"
                     />
-                    <StatusCard 
+                    <StatusCard
                       icon={<User className="w-6 h-6 text-purple-600" />}
                       title="Active Users"
                       value={user ? '1' : '0'}
@@ -2333,7 +2576,7 @@ export default function Settings() {
                       color="purple"
                       status="online"
                     />
-                    <StatusCard 
+                    <StatusCard
                       icon={<FileText className="w-6 h-6 text-orange-600" />}
                       title="Documents"
                       value="0"
@@ -2351,7 +2594,7 @@ export default function Settings() {
                       <Activity className="w-5 h-5" />
                       API Endpoints Status
                     </h2>
-                    <button 
+                    <button
                       onClick={checkHealth}
                       className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
                     >
@@ -2374,7 +2617,7 @@ export default function Settings() {
                     <h3 className="text-lg font-semibold text-gray-800 mb-4">Quick Links</h3>
                     <div className="space-y-2">
                       <a href="http://localhost:8000/docs" target="_blank" rel="noopener noreferrer"
-                         className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition border border-gray-200">
+                        className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition border border-gray-200">
                         <div className="flex items-center gap-3">
                           <FileText className="w-5 h-5 text-blue-600" />
                           <span>API Documentation (Swagger)</span>
@@ -2382,7 +2625,7 @@ export default function Settings() {
                         <ExternalLink className="w-4 h-4 text-gray-400" />
                       </a>
                       <a href="http://localhost:8000/redoc" target="_blank" rel="noopener noreferrer"
-                         className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition border border-gray-200">
+                        className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition border border-gray-200">
                         <div className="flex items-center gap-3">
                           <FileText className="w-5 h-5 text-green-600" />
                           <span>API Documentation (ReDoc)</span>
@@ -2439,17 +2682,15 @@ export default function Settings() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {/* Tesseract Option */}
                       <button
-                        onClick={() => setOcrSettings({...ocrSettings, mode: 'default'})}
-                        className={`p-4 rounded-xl border-2 text-left transition ${
-                          ocrSettings.mode === 'default'
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                        onClick={() => setOcrSettings({ ...ocrSettings, mode: 'default' })}
+                        className={`p-4 rounded-xl border-2 text-left transition ${ocrSettings.mode === 'default'
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                          }`}
                       >
                         <div className="flex items-center gap-3 mb-2">
-                          <div className={`w-4 h-4 rounded-full border-2 ${
-                            ocrSettings.mode === 'default' ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
-                          }`}>
+                          <div className={`w-4 h-4 rounded-full border-2 ${ocrSettings.mode === 'default' ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
+                            }`}>
                             {ocrSettings.mode === 'default' && <div className="w-2 h-2 bg-white rounded-full m-0.5" />}
                           </div>
                           <span className="font-semibold text-gray-900">Tesseract</span>
@@ -2459,17 +2700,15 @@ export default function Settings() {
 
                       {/* Typhoon OCR Option */}
                       <button
-                        onClick={() => setOcrSettings({...ocrSettings, mode: 'typhoon'})}
-                        className={`p-4 rounded-xl border-2 text-left transition ${
-                          ocrSettings.mode === 'typhoon'
-                            ? 'border-purple-500 bg-purple-50'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                        onClick={() => setOcrSettings({ ...ocrSettings, mode: 'typhoon' })}
+                        className={`p-4 rounded-xl border-2 text-left transition ${ocrSettings.mode === 'typhoon'
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                          }`}
                       >
                         <div className="flex items-center gap-3 mb-2">
-                          <div className={`w-4 h-4 rounded-full border-2 ${
-                            ocrSettings.mode === 'typhoon' ? 'border-purple-500 bg-purple-500' : 'border-gray-300'
-                          }`}>
+                          <div className={`w-4 h-4 rounded-full border-2 ${ocrSettings.mode === 'typhoon' ? 'border-purple-500 bg-purple-500' : 'border-gray-300'
+                            }`}>
                             {ocrSettings.mode === 'typhoon' && <div className="w-2 h-2 bg-white rounded-full m-0.5" />}
                           </div>
                           <span className="font-semibold text-gray-900">Typhoon OCR</span>
@@ -2479,17 +2718,15 @@ export default function Settings() {
 
                       {/* Custom API Option */}
                       <button
-                        onClick={() => setOcrSettings({...ocrSettings, mode: 'custom'})}
-                        className={`p-4 rounded-xl border-2 text-left transition ${
-                          ocrSettings.mode === 'custom'
-                            ? 'border-green-500 bg-green-50'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                        onClick={() => setOcrSettings({ ...ocrSettings, mode: 'custom' })}
+                        className={`p-4 rounded-xl border-2 text-left transition ${ocrSettings.mode === 'custom'
+                          ? 'border-green-500 bg-green-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                          }`}
                       >
                         <div className="flex items-center gap-3 mb-2">
-                          <div className={`w-4 h-4 rounded-full border-2 ${
-                            ocrSettings.mode === 'custom' ? 'border-green-500 bg-green-500' : 'border-gray-300'
-                          }`}>
+                          <div className={`w-4 h-4 rounded-full border-2 ${ocrSettings.mode === 'custom' ? 'border-green-500 bg-green-500' : 'border-gray-300'
+                            }`}>
                             {ocrSettings.mode === 'custom' && <div className="w-2 h-2 bg-white rounded-full m-0.5" />}
                           </div>
                           <span className="font-semibold text-gray-900">Custom API</span>
@@ -2514,7 +2751,7 @@ export default function Settings() {
                           <input
                             type="url"
                             value={ocrSettings.typhoon_url}
-                            onChange={(e) => setOcrSettings({...ocrSettings, typhoon_url: e.target.value})}
+                            onChange={(e) => setOcrSettings({ ...ocrSettings, typhoon_url: e.target.value })}
                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                           />
                           <p className="text-xs text-gray-500 mt-1">Default: https://api.opentyphoon.ai/v1/ocr</p>
@@ -2530,7 +2767,7 @@ export default function Settings() {
                               type={showTyphoonKey ? 'text' : 'password'}
                               placeholder="Bearer token..."
                               value={ocrSettings.typhoon_key}
-                              onChange={(e) => setOcrSettings({...ocrSettings, typhoon_key: e.target.value})}
+                              onChange={(e) => setOcrSettings({ ...ocrSettings, typhoon_key: e.target.value })}
                               className="w-full px-4 py-2 pr-20 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                             />
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
@@ -2562,7 +2799,7 @@ export default function Settings() {
                             </label>
                             <select
                               value={ocrSettings.typhoon_model}
-                              onChange={(e) => setOcrSettings({...ocrSettings, typhoon_model: e.target.value})}
+                              onChange={(e) => setOcrSettings({ ...ocrSettings, typhoon_model: e.target.value })}
                               className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                             >
                               <option value="typhoon-ocr">typhoon-ocr</option>
@@ -2574,7 +2811,7 @@ export default function Settings() {
                             </label>
                             <select
                               value={ocrSettings.typhoon_task_type}
-                              onChange={(e) => setOcrSettings({...ocrSettings, typhoon_task_type: e.target.value})}
+                              onChange={(e) => setOcrSettings({ ...ocrSettings, typhoon_task_type: e.target.value })}
                               className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                             >
                               <option value="default">default</option>
@@ -2587,7 +2824,7 @@ export default function Settings() {
                         {/* Generation Parameters */}
                         <div className="pt-4 border-t border-purple-200">
                           <p className="font-medium text-gray-700 mb-4">พารามิเตอร์การประมวลผล</p>
-                          
+
                           <div className="grid grid-cols-2 gap-4">
                             {/* Max Tokens */}
                             <div>
@@ -2600,7 +2837,7 @@ export default function Settings() {
                                 max="32768"
                                 step="1024"
                                 value={ocrSettings.typhoon_max_tokens}
-                                onChange={(e) => setOcrSettings({...ocrSettings, typhoon_max_tokens: parseInt(e.target.value)})}
+                                onChange={(e) => setOcrSettings({ ...ocrSettings, typhoon_max_tokens: parseInt(e.target.value) })}
                                 className="w-full accent-purple-600"
                               />
                             </div>
@@ -2616,7 +2853,7 @@ export default function Settings() {
                                 max="1"
                                 step="0.1"
                                 value={ocrSettings.typhoon_temperature}
-                                onChange={(e) => setOcrSettings({...ocrSettings, typhoon_temperature: parseFloat(e.target.value)})}
+                                onChange={(e) => setOcrSettings({ ...ocrSettings, typhoon_temperature: parseFloat(e.target.value) })}
                                 className="w-full accent-purple-600"
                               />
                             </div>
@@ -2632,7 +2869,7 @@ export default function Settings() {
                                 max="1"
                                 step="0.1"
                                 value={ocrSettings.typhoon_top_p}
-                                onChange={(e) => setOcrSettings({...ocrSettings, typhoon_top_p: parseFloat(e.target.value)})}
+                                onChange={(e) => setOcrSettings({ ...ocrSettings, typhoon_top_p: parseFloat(e.target.value) })}
                                 className="w-full accent-purple-600"
                               />
                             </div>
@@ -2648,7 +2885,7 @@ export default function Settings() {
                                 max="2"
                                 step="0.1"
                                 value={ocrSettings.typhoon_repetition_penalty}
-                                onChange={(e) => setOcrSettings({...ocrSettings, typhoon_repetition_penalty: parseFloat(e.target.value)})}
+                                onChange={(e) => setOcrSettings({ ...ocrSettings, typhoon_repetition_penalty: parseFloat(e.target.value) })}
                                 className="w-full accent-purple-600"
                               />
                             </div>
@@ -2664,7 +2901,7 @@ export default function Settings() {
                             type="text"
                             placeholder='e.g., [1, 2, 3] หรือ {"start": 1, "end": 5}'
                             value={ocrSettings.typhoon_pages}
-                            onChange={(e) => setOcrSettings({...ocrSettings, typhoon_pages: e.target.value})}
+                            onChange={(e) => setOcrSettings({ ...ocrSettings, typhoon_pages: e.target.value })}
                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                           />
                           <p className="text-xs text-gray-500 mt-1">ระบุหน้าที่ต้องการ OCR (JSON format)</p>
@@ -2672,9 +2909,9 @@ export default function Settings() {
 
                         <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
                           <ExternalLink className="w-4 h-4 text-blue-600" />
-                          <a 
-                            href="https://playground.opentyphoon.ai/ocr" 
-                            target="_blank" 
+                          <a
+                            href="https://playground.opentyphoon.ai/ocr"
+                            target="_blank"
                             rel="noopener noreferrer"
                             className="text-sm text-blue-600 hover:underline"
                           >
@@ -2700,7 +2937,7 @@ export default function Settings() {
                             type="url"
                             placeholder="https://api.example.com/ocr"
                             value={ocrSettings.custom_api_url}
-                            onChange={(e) => setOcrSettings({...ocrSettings, custom_api_url: e.target.value})}
+                            onChange={(e) => setOcrSettings({ ...ocrSettings, custom_api_url: e.target.value })}
                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                           />
                           <p className="text-xs text-gray-500 mt-1">URL ของ OCR API endpoint</p>
@@ -2715,7 +2952,7 @@ export default function Settings() {
                               type={showCustomApiKey ? 'text' : 'password'}
                               placeholder="sk-xxxxxxxxxxxxxxxx"
                               value={ocrSettings.custom_api_key}
-                              onChange={(e) => setOcrSettings({...ocrSettings, custom_api_key: e.target.value})}
+                              onChange={(e) => setOcrSettings({ ...ocrSettings, custom_api_key: e.target.value })}
                               className="w-full px-4 py-2 pr-20 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                             />
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
@@ -2747,7 +2984,7 @@ export default function Settings() {
                             type="text"
                             placeholder="e.g., gpt-4-vision, azure-ocr-v3"
                             value={ocrSettings.custom_api_model}
-                            onChange={(e) => setOcrSettings({...ocrSettings, custom_api_model: e.target.value})}
+                            onChange={(e) => setOcrSettings({ ...ocrSettings, custom_api_model: e.target.value })}
                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
                         </div>
@@ -2775,7 +3012,7 @@ export default function Settings() {
                         </label>
                         <select
                           value={ocrSettings.language}
-                          onChange={(e) => setOcrSettings({...ocrSettings, language: e.target.value})}
+                          onChange={(e) => setOcrSettings({ ...ocrSettings, language: e.target.value })}
                           className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         >
                           <option value="tha+eng">ไทย + อังกฤษ (Thai + English)</option>
@@ -2792,7 +3029,7 @@ export default function Settings() {
                         </label>
                         <select
                           value={ocrSettings.dpi}
-                          onChange={(e) => setOcrSettings({...ocrSettings, dpi: parseInt(e.target.value)})}
+                          onChange={(e) => setOcrSettings({ ...ocrSettings, dpi: parseInt(e.target.value) })}
                           className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         >
                           <option value={150}>150 DPI (ประหยัดพื้นที่)</option>
@@ -2814,7 +3051,7 @@ export default function Settings() {
                         min="50"
                         max="95"
                         value={ocrSettings.confidence_threshold}
-                        onChange={(e) => setOcrSettings({...ocrSettings, confidence_threshold: parseInt(e.target.value)})}
+                        onChange={(e) => setOcrSettings({ ...ocrSettings, confidence_threshold: parseInt(e.target.value) })}
                         className="w-full"
                       />
                       <div className="flex justify-between text-xs text-gray-500 mt-1">
@@ -2837,7 +3074,7 @@ export default function Settings() {
                             type="checkbox"
                             id={item.key}
                             checked={(ocrSettings as any)[item.key]}
-                            onChange={(e) => setOcrSettings({...ocrSettings, [item.key]: e.target.checked})}
+                            onChange={(e) => setOcrSettings({ ...ocrSettings, [item.key]: e.target.checked })}
                             className="mt-1 w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                           />
                           <label htmlFor={item.key} className="cursor-pointer">
@@ -2868,7 +3105,7 @@ export default function Settings() {
                         </label>
                         <textarea
                           value={ocrSettings.ocr_template}
-                          onChange={(e) => setOcrSettings({...ocrSettings, ocr_template: e.target.value})}
+                          onChange={(e) => setOcrSettings({ ...ocrSettings, ocr_template: e.target.value })}
                           rows={15}
                           className="w-full px-4 py-3 border rounded-lg font-mono text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                           placeholder="ใส่ prompt template ที่ใช้ส่งไปยัง OCR API..."
@@ -2880,7 +3117,8 @@ export default function Settings() {
 
                       <div className="flex gap-3">
                         <button
-                          onClick={() => setOcrSettings({...ocrSettings, ocr_template: `คุณเป็นระบบ OCR สำหรับเอกสารสัญญาภาครัฐ
+                          onClick={() => setOcrSettings({
+                            ...ocrSettings, ocr_template: `คุณเป็นระบบ OCR สำหรับเอกสารสัญญาภาครัฐ
 
 กรุณาอ่านเอกสารที่ให้มาและสกัดข้อมูลตามโครงสร้างนี้:
 
@@ -2930,14 +3168,13 @@ export default function Settings() {
                   </div>
 
                   {/* File Upload Area */}
-                  <div 
+                  <div
                     onDrop={handleDrop}
                     onDragOver={(e) => e.preventDefault()}
-                    className={`border-2 border-dashed rounded-lg p-8 text-center transition ${
-                      ocrTestFile 
-                        ? 'border-green-400 bg-green-50' 
-                        : 'border-gray-300 hover:border-gray-400'
-                    }`}
+                    className={`border-2 border-dashed rounded-lg p-8 text-center transition ${ocrTestFile
+                      ? 'border-green-400 bg-green-50'
+                      : 'border-gray-300 hover:border-gray-400'
+                      }`}
                   >
                     <input
                       ref={fileInputRef}
@@ -2946,7 +3183,7 @@ export default function Settings() {
                       onChange={handleFileSelect}
                       className="hidden"
                     />
-                    
+
                     {ocrTestFile ? (
                       <div className="space-y-2">
                         <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto">
@@ -2962,7 +3199,7 @@ export default function Settings() {
                         <ScanLine className="w-12 h-12 text-gray-400 mx-auto mb-3" />
                         <p className="text-gray-600 mb-2">ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์</p>
                         <p className="text-sm text-gray-400">รองรับ PDF, PNG, JPG, TIFF (สูงสุด 10MB)</p>
-                        <button 
+                        <button
                           onClick={() => fileInputRef.current?.click()}
                           className="mt-4 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
                         >
@@ -2993,7 +3230,7 @@ export default function Settings() {
                           </>
                         )}
                       </button>
-                      
+
                       {/* Secondary: Test with current settings (custom) */}
                       <button
                         onClick={handleOcrTest}
@@ -3069,35 +3306,32 @@ export default function Settings() {
                     {aiProviders.filter(p => p.modelType === 'llm').map((provider) => (
                       <div
                         key={provider.id}
-                        className={`p-4 rounded-xl border-2 transition ${
-                          activeLLMId === provider.id
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                        className={`p-4 rounded-xl border-2 transition ${activeLLMId === provider.id
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                          }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-4">
                             <button
                               onClick={() => setActiveLLMId(provider.id)}
-                              className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                                activeLLMId === provider.id
-                                  ? 'border-blue-500 bg-blue-500'
-                                  : 'border-gray-300'
-                              }`}
+                              className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${activeLLMId === provider.id
+                                ? 'border-blue-500 bg-blue-500'
+                                : 'border-gray-300'
+                                }`}
                             >
                               {activeLLMId === provider.id && (
                                 <div className="w-2.5 h-2.5 bg-white rounded-full" />
                               )}
                             </button>
-                            
+
                             <div>
                               <div className="flex items-center gap-2">
                                 <h3 className="font-semibold text-gray-900">{provider.name}</h3>
-                                <span className={`px-2 py-0.5 rounded text-xs ${
-                                  provider.type === 'ollama' ? 'bg-orange-100 text-orange-700' :
+                                <span className={`px-2 py-0.5 rounded text-xs ${provider.type === 'ollama' ? 'bg-orange-100 text-orange-700' :
                                   provider.type === 'vllm' ? 'bg-purple-100 text-purple-700' :
-                                  'bg-green-100 text-green-700'
-                                }`}>
+                                    'bg-green-100 text-green-700'
+                                  }`}>
                                   {provider.type}
                                 </span>
                                 {provider.supportsGraphRAG && (
@@ -3117,12 +3351,28 @@ export default function Settings() {
                           </div>
 
                           <div className="flex items-center gap-2">
+                            {activeLLMId !== provider.id && (
+                              <button
+                                onClick={() => handleSetDefaultProvider(provider)}
+                                className="px-3 py-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition font-medium"
+                                title="ตั้งเป็น Default"
+                              >
+                                ตั้งเป็น Default
+                              </button>
+                            )}
                             <button
                               onClick={() => setEditingProvider(provider)}
                               className="p-2 hover:bg-gray-100 rounded-lg transition"
                               title="แก้ไข"
                             >
                               <Edit3 className="w-4 h-4 text-gray-500" />
+                            </button>
+                            <button
+                              onClick={() => testProviderConnection(provider)}
+                              className="p-2 hover:bg-green-50 rounded-lg transition"
+                              title="ทดสอบการเชื่อมต่อ"
+                            >
+                              <Activity className="w-4 h-4 text-green-600" />
                             </button>
                             <button
                               onClick={() => setShowDeleteConfirm(provider.id)}
@@ -3164,35 +3414,32 @@ export default function Settings() {
                     {aiProviders.filter(p => p.modelType === 'embedding').map((provider) => (
                       <div
                         key={provider.id}
-                        className={`p-4 rounded-xl border-2 transition ${
-                          activeEmbeddingId === provider.id
-                            ? 'border-purple-500 bg-purple-50'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                        className={`p-4 rounded-xl border-2 transition ${activeEmbeddingId === provider.id
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                          }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-4">
                             <button
                               onClick={() => setActiveEmbeddingId(provider.id)}
-                              className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                                activeEmbeddingId === provider.id
-                                  ? 'border-purple-500 bg-purple-500'
-                                  : 'border-gray-300'
-                              }`}
+                              className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${activeEmbeddingId === provider.id
+                                ? 'border-purple-500 bg-purple-500'
+                                : 'border-gray-300'
+                                }`}
                             >
                               {activeEmbeddingId === provider.id && (
                                 <div className="w-2.5 h-2.5 bg-white rounded-full" />
                               )}
                             </button>
-                            
+
                             <div>
                               <div className="flex items-center gap-2">
                                 <h3 className="font-semibold text-gray-900">{provider.name}</h3>
-                                <span className={`px-2 py-0.5 rounded text-xs ${
-                                  provider.type === 'ollama' ? 'bg-orange-100 text-orange-700' :
+                                <span className={`px-2 py-0.5 rounded text-xs ${provider.type === 'ollama' ? 'bg-orange-100 text-orange-700' :
                                   provider.type === 'vllm' ? 'bg-purple-100 text-purple-700' :
-                                  'bg-green-100 text-green-700'
-                                }`}>
+                                    'bg-green-100 text-green-700'
+                                  }`}>
                                   {provider.type}
                                 </span>
                                 {activeEmbeddingId === provider.id && (
@@ -3207,12 +3454,28 @@ export default function Settings() {
                           </div>
 
                           <div className="flex items-center gap-2">
+                            {activeEmbeddingId !== provider.id && (
+                              <button
+                                onClick={() => handleSetDefaultProvider(provider)}
+                                className="px-3 py-1 text-xs bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition font-medium"
+                                title="ตั้งเป็น Default"
+                              >
+                                ตั้งเป็น Default
+                              </button>
+                            )}
                             <button
                               onClick={() => setEditingProvider(provider)}
                               className="p-2 hover:bg-gray-100 rounded-lg transition"
                               title="แก้ไข"
                             >
                               <Edit3 className="w-4 h-4 text-gray-500" />
+                            </button>
+                            <button
+                              onClick={() => testProviderConnection(provider)}
+                              className="p-2 hover:bg-green-50 rounded-lg transition"
+                              title="ทดสอบการเชื่อมต่อ"
+                            >
+                              <Activity className="w-4 h-4 text-green-600" />
                             </button>
                             <button
                               onClick={() => setShowDeleteConfirm(provider.id)}
@@ -3394,7 +3657,7 @@ export default function Settings() {
                           <input
                             type="checkbox"
                             checked={(aiFeatures as any)[item.key]}
-                            onChange={(e) => setAiFeatures({...aiFeatures, [item.key]: e.target.checked})}
+                            onChange={(e) => setAiFeatures({ ...aiFeatures, [item.key]: e.target.checked })}
                             className="sr-only peer"
                           />
                           <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
@@ -3448,7 +3711,7 @@ export default function Settings() {
                           <p className="text-sm text-gray-500">จัดการ AI Agents ที่ใช้งานในระบบ</p>
                         </div>
                       </div>
-                      <button 
+                      <button
                         onClick={() => setShowAgentForm(true)}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
                       >
@@ -3461,17 +3724,15 @@ export default function Settings() {
                       {agents.map((agent) => (
                         <div key={agent.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border hover:border-blue-300 transition">
                           <div className="flex items-center gap-4">
-                            <div className={`p-3 rounded-lg ${
-                              agent.status === 'active' ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'
-                            }`}>
+                            <div className={`p-3 rounded-lg ${agent.status === 'active' ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'
+                              }`}>
                               <Bot className="w-5 h-5" />
                             </div>
                             <div>
                               <div className="flex items-center gap-2">
                                 <h3 className="font-medium text-gray-900">{agent.name}</h3>
-                                <span className={`px-2 py-0.5 text-xs rounded-full ${
-                                  agent.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                                }`}>
+                                <span className={`px-2 py-0.5 text-xs rounded-full ${agent.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                                  }`}>
                                   {agent.status === 'active' ? 'ทำงาน' : 'หยุด'}
                                 </span>
                                 {agent.is_system && (
@@ -3507,17 +3768,16 @@ export default function Settings() {
                             </button>
                             <button
                               onClick={() => handleToggleAgent(agent.id)}
-                              className={`p-2 rounded-lg transition ${
-                                agent.status === 'active' 
-                                  ? 'hover:bg-yellow-50 text-yellow-600' 
-                                  : 'hover:bg-green-50 text-green-600'
-                              }`}
+                              className={`p-2 rounded-lg transition ${agent.status === 'active'
+                                ? 'hover:bg-yellow-50 text-yellow-600'
+                                : 'hover:bg-green-50 text-green-600'
+                                }`}
                               title={agent.status === 'active' ? 'หยุดการทำงาน' : 'เริ่มทำงาน'}
                             >
                               {agent.status === 'active' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                             </button>
                             {!agent.is_system && (
-                              <button 
+                              <button
                                 onClick={() => handleDeleteAgent(agent.id)}
                                 className="p-2 hover:bg-red-50 text-red-600 rounded-lg transition"
                                 title="ลบ"
@@ -3602,11 +3862,11 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">ให้ Agents ทำงานอัตโนมัติเมื่อมีเอกสารใหม่</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          className="sr-only peer" 
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
                           checked={agentGlobalConfig.auto_execute}
-                          onChange={(e) => setAgentGlobalConfig({...agentGlobalConfig, auto_execute: e.target.checked})}
+                          onChange={(e) => setAgentGlobalConfig({ ...agentGlobalConfig, auto_execute: e.target.checked })}
                         />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                       </label>
@@ -3617,11 +3877,11 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">ให้ Agents ทำงานพร้อมกันเพื่อความเร็ว</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          className="sr-only peer" 
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
                           checked={agentGlobalConfig.parallel_processing}
-                          onChange={(e) => setAgentGlobalConfig({...agentGlobalConfig, parallel_processing: e.target.checked})}
+                          onChange={(e) => setAgentGlobalConfig({ ...agentGlobalConfig, parallel_processing: e.target.checked })}
                         />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                       </label>
@@ -3632,11 +3892,11 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">แจ้งเตือนเมื่อ Agent ทำงานเสร็จ</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          className="sr-only peer" 
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
                           checked={agentGlobalConfig.notification_on_complete}
-                          onChange={(e) => setAgentGlobalConfig({...agentGlobalConfig, notification_on_complete: e.target.checked})}
+                          onChange={(e) => setAgentGlobalConfig({ ...agentGlobalConfig, notification_on_complete: e.target.checked })}
                         />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                       </label>
@@ -3658,7 +3918,7 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">จัดการฐานความรู้สำหรับ AI Agents</p>
                       </div>
                     </div>
-                    <button 
+                    <button
                       onClick={() => setShowKBForm(true)}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
                     >
@@ -3672,7 +3932,7 @@ export default function Settings() {
                       <BookOpen className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <h3 className="text-lg font-medium text-gray-900 mb-2">ยังไม่มี Knowledge Base</h3>
                       <p className="text-gray-500 mb-4">สร้าง Knowledge Base เพื่อให้ AI Agents อ้างอิงข้อมูล</p>
-                      <button 
+                      <button
                         onClick={() => setShowKBForm(true)}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition mx-auto"
                       >
@@ -3683,8 +3943,8 @@ export default function Settings() {
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {knowledgeBases.map((kb) => (
-                        <div 
-                          key={kb.id} 
+                        <div
+                          key={kb.id}
                           className="p-4 bg-gray-50 rounded-lg border hover:border-blue-300 transition"
                         >
                           <div className="flex items-start justify-between mb-3">
@@ -3694,15 +3954,14 @@ export default function Settings() {
                               </div>
                               <div>
                                 <h3 className="font-medium text-gray-900">{kb.name}</h3>
-                                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                  kb.is_system ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
-                                }`}>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${kb.is_system ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                                  }`}>
                                   {kb.is_system ? 'System' : (kb.kb_type || 'custom')}
                                 </span>
                               </div>
                             </div>
                             {!kb.is_system && (
-                              <button 
+                              <button
                                 onClick={() => handleDeleteKnowledgeBase(kb.id)}
                                 className="p-1.5 hover:bg-red-50 text-red-600 rounded-lg transition"
                                 title="ลบ"
@@ -3744,7 +4003,7 @@ export default function Settings() {
                       </div>
                       <span className="text-sm text-green-600 font-medium">พร้อมใช้งาน</span>
                     </div>
-                    
+
                     {/* Embedding Model Selection */}
                     <div className="py-3 border-b">
                       <div className="flex items-center justify-between mb-2">
@@ -3755,7 +4014,7 @@ export default function Settings() {
                       </div>
                       <select
                         value={ragSettings.embeddingProviderId}
-                        onChange={(e) => setRagSettings({...ragSettings, embeddingProviderId: e.target.value})}
+                        onChange={(e) => setRagSettings({ ...ragSettings, embeddingProviderId: e.target.value })}
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                       >
                         <option value="">เลือก Embedding Model</option>
@@ -3776,7 +4035,7 @@ export default function Settings() {
                         </p>
                       )}
                     </div>
-                    
+
                     {/* Chunk Size Selection */}
                     <div className="py-3 border-b">
                       <div className="flex items-center justify-between mb-2">
@@ -3787,7 +4046,7 @@ export default function Settings() {
                       </div>
                       <select
                         value={ragSettings.chunkSize}
-                        onChange={(e) => setRagSettings({...ragSettings, chunkSize: parseInt(e.target.value)})}
+                        onChange={(e) => setRagSettings({ ...ragSettings, chunkSize: parseInt(e.target.value) })}
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                       >
                         <option value={256}>256 tokens (เหมาะกับเอกสารสั้น)</option>
@@ -3796,7 +4055,7 @@ export default function Settings() {
                         <option value={2048}>2048 tokens (เอกสารที่ซับซ้อนมาก)</option>
                       </select>
                     </div>
-                    
+
                     {/* Chunk Overlap Selection */}
                     <div className="py-3">
                       <div className="flex items-center justify-between mb-2">
@@ -3807,7 +4066,7 @@ export default function Settings() {
                       </div>
                       <select
                         value={ragSettings.chunkOverlap}
-                        onChange={(e) => setRagSettings({...ragSettings, chunkOverlap: parseInt(e.target.value)})}
+                        onChange={(e) => setRagSettings({ ...ragSettings, chunkOverlap: parseInt(e.target.value) })}
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                       >
                         <option value={0}>0 tokens (ไม่ทับซ้อน)</option>
@@ -3818,7 +4077,7 @@ export default function Settings() {
                       </select>
                     </div>
                   </div>
-                  
+
                   {/* Save RAG Settings Button */}
                   <div className="mt-4 pt-4 border-t flex justify-end">
                     <button
@@ -3848,7 +4107,7 @@ export default function Settings() {
                     <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-lg font-semibold text-gray-900">สร้าง Knowledge Base</h3>
-                        <button 
+                        <button
                           onClick={() => setShowKBForm(false)}
                           className="p-2 hover:bg-gray-100 rounded-lg transition"
                         >
@@ -4276,7 +4535,7 @@ export default function Settings() {
                   </div>
                 </div>
 
-                {/* Organization Tree */}
+                {/* Organization Tree / Chart */}
                 <div className="bg-white rounded-xl shadow-sm border p-6">
                   <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
@@ -4286,13 +4545,32 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">กระทรวง &gt; กรม &gt; สำนัก/กอง &gt; งาน/ฝ่าย</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setShowOrgUnitForm(!showOrgUnitForm)}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-                    >
-                      <Plus className="w-4 h-4" />
-                      เพิ่มหน่วยงาน
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {/* View mode toggle */}
+                      <div className="flex border border-gray-200 rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => setOrgViewMode('tree')}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm transition ${orgViewMode === 'tree' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                        >
+                          <Layers className="w-4 h-4" />
+                          รายการ
+                        </button>
+                        <button
+                          onClick={() => setOrgViewMode('chart')}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm transition ${orgViewMode === 'chart' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                        >
+                          <Workflow className="w-4 h-4" />
+                          ผังองค์กร
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => setShowOrgUnitForm(!showOrgUnitForm)}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                      >
+                        <Plus className="w-4 h-4" />
+                        เพิ่มหน่วยงาน
+                      </button>
+                    </div>
                   </div>
 
                   {/* Add unit form */}
@@ -4318,6 +4596,15 @@ export default function Settings() {
                             {Object.entries(orgLevelLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                           </select>
                         </div>
+                        <div className="col-span-2">
+                          <label className="block text-xs font-medium text-gray-700 mb-1">สังกัด (หน่วยงานต้นสังกัด)</label>
+                          <select value={newOrgUnitForm.parent_id} onChange={(e) => setNewOrgUnitForm({ ...newOrgUnitForm, parent_id: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                            <option value="">— ไม่มีต้นสังกัด (ระดับบนสุด) —</option>
+                            {flattenOrgTree(orgTree).map((u) => (
+                              <option key={u.id} value={u.id}>{u.full_path} ({orgLevelLabels[u.level] || u.level})</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                       <div className="flex gap-2 mt-3">
                         <button onClick={handleCreateOrgUnit} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
@@ -4329,62 +4616,99 @@ export default function Settings() {
                   )}
 
                   {/* Tree View */}
-                  <div className="border rounded-lg p-4 max-h-96 overflow-y-auto">
-                    {orgLoading ? (
-                      <div className="flex items-center justify-center py-8">
+                  {orgViewMode === 'tree' ? (
+                    <div className="border rounded-lg p-4 max-h-[480px] overflow-y-auto">
+                      {orgLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mr-2" />
+                          <span className="text-gray-500">กำลังโหลด...</span>
+                        </div>
+                      ) : orgTree.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                          <Building2 className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                          <p>ยังไม่มีข้อมูลโครงสร้างองค์กร</p>
+                          <p className="text-sm mt-1">เริ่มต้นโดยการเพิ่มหน่วยงานระดับบน (กระทรวง/สำนักงาน)</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {orgTree.map((node) => {
+                            const renderNode = (n: any, depth: number): React.ReactNode => {
+                              const levelColorMap: Record<string, string> = {
+                                ministry: 'border-purple-200 bg-purple-50 text-purple-700',
+                                department: 'border-blue-200 bg-blue-50 text-blue-700',
+                                bureau: 'border-green-200 bg-green-50 text-green-700',
+                                division: 'border-yellow-200 bg-yellow-50 text-yellow-700',
+                                section: 'border-orange-200 bg-orange-50 text-orange-700',
+                                unit: 'border-gray-200 bg-gray-50 text-gray-700',
+                              }
+                              const color = levelColorMap[n.level] || 'border-gray-200 bg-gray-50 text-gray-700'
+                              const isDeleting = deleteOrgUnitId === n.id
+                              return (
+                                <div key={n.id} style={{ marginLeft: `${depth * 20}px` }}>
+                                  {isDeleting ? (
+                                    <div className="flex items-center gap-2 p-2 rounded-lg border border-red-200 bg-red-50 mb-1">
+                                      <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                                      <span className="text-sm text-red-700 flex-1">ลบ <strong>{n.name_th}</strong>?</span>
+                                      <button onClick={() => handleDeleteOrgUnit(n.id)} className="px-3 py-1 bg-red-600 text-white text-xs rounded-lg hover:bg-red-700">ยืนยัน</button>
+                                      <button onClick={() => setDeleteOrgUnitId(null)} className="px-3 py-1 border border-gray-300 text-xs rounded-lg hover:bg-gray-50">ยกเลิก</button>
+                                    </div>
+                                  ) : (
+                                    <div className={`group flex items-center gap-2 p-2 rounded-lg border ${color} mb-1`}>
+                                      {n.children?.length > 0 ? <ChevronDown className="w-3 h-3 flex-shrink-0" /> : <ChevronRight className="w-3 h-3 flex-shrink-0 opacity-0" />}
+                                      <Building2 className="w-4 h-4 flex-shrink-0" />
+                                      <div className="flex-1 min-w-0">
+                                        <span className="font-medium text-sm">{n.name_th}</span>
+                                        {depth > 0 && n.full_path && (
+                                          <p className="text-xs opacity-60 truncate">สังกัด: {n.full_path.split(' / ').slice(0, -1).join(' / ')}</p>
+                                        )}
+                                      </div>
+                                      <span className="text-xs px-2 py-0.5 bg-white/70 rounded-full border flex-shrink-0">{orgLevelLabels[n.level] || n.level}</span>
+                                      <span className="text-xs opacity-70 flex-shrink-0">{n.user_count} คน</span>
+                                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                        <button onClick={() => handleOpenEditOrgUnit(n)} className="p-1 hover:bg-white/80 rounded" title="แก้ไข">
+                                          <Edit3 className="w-3.5 h-3.5 text-gray-500" />
+                                        </button>
+                                        <button onClick={() => setDeleteOrgUnitId(n.id)} className="p-1 hover:bg-white/80 rounded" title="ลบ">
+                                          <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {n.children?.map((child: any) => renderNode(child, depth + 1))}
+                                </div>
+                              )
+                            }
+                            return renderNode(node, 0)
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Chart View */
+                    orgLoading ? (
+                      <div className="flex items-center justify-center py-16">
                         <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mr-2" />
                         <span className="text-gray-500">กำลังโหลด...</span>
                       </div>
-                    ) : orgTree.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500">
-                        <Building2 className="w-10 h-10 mx-auto mb-2 text-gray-300" />
-                        <p>ยังไม่มีข้อมูลโครงสร้างองค์กร</p>
-                        <p className="text-sm mt-1">เริ่มต้นโดยการเพิ่มหน่วยงานระดับบน (กระทรวง/สำนักงาน)</p>
-                      </div>
                     ) : (
-                      <div className="space-y-1">
-                        {orgTree.map((node) => {
-                          const renderNode = (n: any, depth: number): React.ReactNode => {
-                            const levelColorMap: Record<string, string> = {
-                              ministry: 'border-purple-200 bg-purple-50 text-purple-700',
-                              department: 'border-blue-200 bg-blue-50 text-blue-700',
-                              bureau: 'border-green-200 bg-green-50 text-green-700',
-                              division: 'border-yellow-200 bg-yellow-50 text-yellow-700',
-                              section: 'border-orange-200 bg-orange-50 text-orange-700',
-                              unit: 'border-gray-200 bg-gray-50 text-gray-700',
-                            }
-                            const color = levelColorMap[n.level] || 'border-gray-200 bg-gray-50 text-gray-700'
-                            return (
-                              <div key={n.id} style={{ marginLeft: `${depth * 20}px` }}>
-                                <div className={`flex items-center gap-2 p-2 rounded-lg border ${color} mb-1`}>
-                                  {n.children?.length > 0 ? <ChevronDown className="w-3 h-3 flex-shrink-0" /> : <ChevronRight className="w-3 h-3 flex-shrink-0 opacity-0" />}
-                                  <Building2 className="w-4 h-4 flex-shrink-0" />
-                                  <span className="font-medium text-sm flex-1">{n.name_th}</span>
-                                  <span className="text-xs px-2 py-0.5 bg-white/70 rounded-full border">{orgLevelLabels[n.level] || n.level}</span>
-                                  <span className="text-xs opacity-70">{n.user_count} คน</span>
-                                </div>
-                                {n.children?.map((child: any) => renderNode(child, depth + 1))}
-                              </div>
-                            )
-                          }
-                          return renderNode(node, 0)
-                        })}
-                      </div>
-                    )}
-                  </div>
+                      <OrgChart roots={orgTree} />
+                    )
+                  )}
 
-                  {/* Level Legend */}
-                  <div className="mt-4 flex flex-wrap gap-3 text-xs">
-                    {Object.entries(orgLevelLabels).map(([level, label]) => {
-                      const dotColors: Record<string, string> = { ministry: 'bg-purple-600', department: 'bg-blue-600', bureau: 'bg-green-600', division: 'bg-yellow-600', section: 'bg-orange-600', unit: 'bg-gray-600' }
-                      return (
-                        <div key={level} className="flex items-center gap-1.5">
-                          <div className={`w-2.5 h-2.5 rounded ${dotColors[level] || 'bg-gray-600'}`}></div>
-                          <span className="text-gray-600">{label}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
+                  {/* Level Legend (tree mode only) */}
+                  {orgViewMode === 'tree' && (
+                    <div className="mt-4 flex flex-wrap gap-3 text-xs">
+                      {Object.entries(orgLevelLabels).map(([level, label]) => {
+                        const dotColors: Record<string, string> = { ministry: 'bg-purple-600', department: 'bg-blue-600', bureau: 'bg-green-600', division: 'bg-yellow-600', section: 'bg-orange-600', unit: 'bg-gray-600' }
+                        return (
+                          <div key={level} className="flex items-center gap-1.5">
+                            <div className={`w-2.5 h-2.5 rounded ${dotColors[level] || 'bg-gray-600'}`}></div>
+                            <span className="text-gray-600">{label}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Positions */}
@@ -4430,6 +4754,15 @@ export default function Settings() {
                           <input type="number" min={1} max={10} value={newPositionForm.level} onChange={(e) => setNewPositionForm({ ...newPositionForm, level: parseInt(e.target.value) || 3 })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
                         </div>
                       </div>
+                      <div className="mt-3">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">สังกัด (หน่วยงาน)</label>
+                        <select value={newPositionForm.org_unit_id} onChange={(e) => setNewPositionForm({ ...newPositionForm, org_unit_id: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                          <option value="">— ไม่ระบุหน่วยงาน —</option>
+                          {flattenOrgTree(orgTree).map((u) => (
+                            <option key={u.id} value={u.id}>{u.full_path} ({orgLevelLabels[u.level] || u.level})</option>
+                          ))}
+                        </select>
+                      </div>
                       <div className="flex items-center gap-3 mt-3">
                         <label className="flex items-center gap-2 text-sm">
                           <input type="checkbox" checked={newPositionForm.is_management} onChange={(e) => setNewPositionForm({ ...newPositionForm, is_management: e.target.checked })} className="w-4 h-4 rounded" />
@@ -4455,36 +4788,180 @@ export default function Settings() {
                           <th className="text-left py-3 px-4 font-medium text-gray-700">สังกัด</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">สายงาน</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">ผู้ใช้</th>
+                          <th className="py-3 px-4"></th>
                         </tr>
                       </thead>
                       <tbody>
                         {orgLoading ? (
-                          <tr><td colSpan={6} className="py-8 text-center text-gray-400">กำลังโหลด...</td></tr>
+                          <tr><td colSpan={7} className="py-8 text-center text-gray-400">กำลังโหลด...</td></tr>
                         ) : orgPositions.length === 0 ? (
-                          <tr><td colSpan={6} className="py-8 text-center text-gray-400">ยังไม่มีข้อมูลตำแหน่ง</td></tr>
+                          <tr><td colSpan={7} className="py-8 text-center text-gray-400">ยังไม่มีข้อมูลตำแหน่ง</td></tr>
                         ) : (
                           orgPositions.map((pos) => (
-                            <tr key={pos.id} className="border-b hover:bg-gray-50">
-                              <td className="py-3 px-4 font-mono text-sm text-gray-600">{pos.code}</td>
-                              <td className="py-3 px-4">
-                                <p className="font-medium text-gray-900">{pos.name_th}</p>
-                                {pos.name_en && <p className="text-xs text-gray-500">{pos.name_en}</p>}
-                              </td>
-                              <td className="py-3 px-4 text-gray-600">{pos.level}</td>
-                              <td className="py-3 px-4 text-gray-600">{pos.org_unit_name || '-'}</td>
-                              <td className="py-3 px-4">
-                                {pos.career_track ? (
-                                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
-                                    {careerTrackLabels[pos.career_track] || pos.career_track}
-                                  </span>
-                                ) : '-'}
-                              </td>
-                              <td className="py-3 px-4 text-gray-600">{pos.user_count}</td>
-                            </tr>
+                            deletePositionId === pos.id ? (
+                              <tr key={pos.id} className="border-b bg-red-50">
+                                <td colSpan={7} className="py-3 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                                    <span className="text-sm text-red-700">ลบตำแหน่ง <strong>{pos.name_th}</strong>?</span>
+                                    <button onClick={() => handleDeletePosition(pos.id)} className="px-3 py-1 bg-red-600 text-white text-xs rounded-lg hover:bg-red-700">ยืนยัน</button>
+                                    <button onClick={() => setDeletePositionId(null)} className="px-3 py-1 border text-xs rounded-lg hover:bg-gray-50">ยกเลิก</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : (
+                              <tr key={pos.id} className="border-b hover:bg-gray-50 group">
+                                <td className="py-3 px-4 font-mono text-sm text-gray-600">{pos.code}</td>
+                                <td className="py-3 px-4">
+                                  <p className="font-medium text-gray-900">{pos.name_th}</p>
+                                  {pos.name_en && <p className="text-xs text-gray-500">{pos.name_en}</p>}
+                                </td>
+                                <td className="py-3 px-4 text-gray-600">{pos.level}</td>
+                                <td className="py-3 px-4 text-gray-600">{pos.org_unit_name || '-'}</td>
+                                <td className="py-3 px-4">
+                                  {pos.career_track ? (
+                                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
+                                      {careerTrackLabels[pos.career_track] || pos.career_track}
+                                    </span>
+                                  ) : '-'}
+                                </td>
+                                <td className="py-3 px-4 text-gray-600">{pos.user_count}</td>
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => handleOpenEditPosition(pos)} className="p-1.5 hover:bg-gray-100 rounded" title="แก้ไข">
+                                      <Edit3 className="w-3.5 h-3.5 text-gray-500" />
+                                    </button>
+                                    <button onClick={() => setDeletePositionId(pos.id)} className="p-1.5 hover:bg-red-50 rounded" title="ลบ">
+                                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
                           ))
                         )}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Edit OrgUnit Modal ── */}
+            {editingOrgUnit && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+                  <div className="flex items-center justify-between p-5 border-b">
+                    <h3 className="text-base font-semibold text-gray-900">แก้ไขหน่วยงาน</h3>
+                    <button onClick={() => setEditingOrgUnit(null)} className="p-1.5 hover:bg-gray-100 rounded-lg">
+                      <X className="w-4 h-4 text-gray-500" />
+                    </button>
+                  </div>
+                  <div className="p-5 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อ (ไทย) *</label>
+                        <input value={editOrgUnitForm.name_th} onChange={(e) => setEditOrgUnitForm({ ...editOrgUnitForm, name_th: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อ (อังกฤษ)</label>
+                        <input value={editOrgUnitForm.name_en} onChange={(e) => setEditOrgUnitForm({ ...editOrgUnitForm, name_en: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ระดับ</label>
+                        <select value={editOrgUnitForm.level} onChange={(e) => setEditOrgUnitForm({ ...editOrgUnitForm, level: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                          {Object.entries(orgLevelLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                        </select>
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">สังกัด (หน่วยงานต้นสังกัด)</label>
+                        <select value={editOrgUnitForm.parent_id} onChange={(e) => setEditOrgUnitForm({ ...editOrgUnitForm, parent_id: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                          <option value="">— ไม่มีต้นสังกัด (ระดับบนสุด) —</option>
+                          {flattenOrgTree(orgTree).filter(u => u.id !== editingOrgUnit.id).map((u) => (
+                            <option key={u.id} value={u.id}>{u.full_path} ({orgLevelLabels[u.level] || u.level})</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อผู้บริหาร</label>
+                        <input value={editOrgUnitForm.director_name} onChange={(e) => setEditOrgUnitForm({ ...editOrgUnitForm, director_name: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="ชื่อ-นามสกุล" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ตำแหน่งผู้บริหาร</label>
+                        <input value={editOrgUnitForm.director_position} onChange={(e) => setEditOrgUnitForm({ ...editOrgUnitForm, director_position: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" placeholder="เช่น อธิบดี, ผู้อำนวยการ" />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={editOrgUnitForm.is_active} onChange={(e) => setEditOrgUnitForm({ ...editOrgUnitForm, is_active: e.target.checked })} className="w-4 h-4 rounded" />
+                      เปิดใช้งาน
+                    </label>
+                  </div>
+                  <div className="flex gap-2 p-5 border-t">
+                    <button onClick={handleUpdateOrgUnit} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                      {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+                    </button>
+                    <button onClick={() => setEditingOrgUnit(null)} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">ยกเลิก</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Edit Position Modal ── */}
+            {editingPosition && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+                  <div className="flex items-center justify-between p-5 border-b">
+                    <h3 className="text-base font-semibold text-gray-900">แก้ไขตำแหน่ง</h3>
+                    <button onClick={() => setEditingPosition(null)} className="p-1.5 hover:bg-gray-100 rounded-lg">
+                      <X className="w-4 h-4 text-gray-500" />
+                    </button>
+                  </div>
+                  <div className="p-5 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อตำแหน่ง (ไทย) *</label>
+                        <input value={editPositionForm.name_th} onChange={(e) => setEditPositionForm({ ...editPositionForm, name_th: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ชื่อตำแหน่ง (อังกฤษ)</label>
+                        <input value={editPositionForm.name_en} onChange={(e) => setEditPositionForm({ ...editPositionForm, name_en: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">ระดับ (1-10)</label>
+                        <input type="number" min={1} max={10} value={editPositionForm.level} onChange={(e) => setEditPositionForm({ ...editPositionForm, level: parseInt(e.target.value) || 1 })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">สายงาน</label>
+                        <select value={editPositionForm.career_track} onChange={(e) => setEditPositionForm({ ...editPositionForm, career_track: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                          {Object.entries(careerTrackLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                        </select>
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">สังกัด (หน่วยงาน)</label>
+                        <select value={editPositionForm.org_unit_id} onChange={(e) => setEditPositionForm({ ...editPositionForm, org_unit_id: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                          <option value="">— ไม่ระบุหน่วยงาน —</option>
+                          {flattenOrgTree(orgTree).map((u) => (
+                            <option key={u.id} value={u.id}>{u.full_path} ({orgLevelLabels[u.level] || u.level})</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={editPositionForm.is_management} onChange={(e) => setEditPositionForm({ ...editPositionForm, is_management: e.target.checked })} className="w-4 h-4 rounded" />
+                        ตำแหน่งบริหาร
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={editPositionForm.is_active} onChange={(e) => setEditPositionForm({ ...editPositionForm, is_active: e.target.checked })} className="w-4 h-4 rounded" />
+                        เปิดใช้งาน
+                      </label>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 p-5 border-t">
+                    <button onClick={handleUpdatePosition} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                      {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+                    </button>
+                    <button onClick={() => setEditingPosition(null)} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">ยกเลิก</button>
                   </div>
                 </div>
               </div>
@@ -4722,7 +5199,7 @@ export default function Settings() {
                       <p className="text-sm text-gray-500">ตั้งค่าการแจ้งเตือนส่วนตัวและระดับองค์กร</p>
                     </div>
                   </div>
-                  
+
                   <NotificationSettings userRole={user?.role || 'user'} />
                 </div>
               </div>
@@ -4740,30 +5217,37 @@ export default function Settings() {
                         <p className="text-sm text-gray-500">จัดการแม่แบบสัญญาสำหรับใช้งานซ้ำ</p>
                       </div>
                     </div>
-                    <button 
-                      onClick={() => setShowCreateTemplate(true)}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-                    >
-                      <Plus className="w-4 h-4" />
-                      สร้าง Template ใหม่
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowSmartImport(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        นำเข้าสัญญา (Smart)
+                      </button>
+                      <button
+                        onClick={() => setShowCreateTemplate(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                      >
+                        <Plus className="w-4 h-4" />
+                        สร้าง Template ใหม่
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 gap-4">
                     {templates.map((template) => (
-                      <div 
-                        key={template.id} 
+                      <div
+                        key={template.id}
                         onClick={() => setSelectedTemplateId(template.id)}
-                        className={`flex items-center justify-between p-4 border rounded-lg cursor-pointer transition ${
-                          selectedTemplateId === template.id 
-                            ? 'border-blue-500 bg-blue-50 shadow-sm' 
-                            : 'hover:border-blue-300 hover:shadow-sm'
-                        }`}
+                        className={`flex items-center justify-between p-4 border rounded-lg cursor-pointer transition ${selectedTemplateId === template.id
+                          ? 'border-blue-500 bg-blue-50 shadow-sm'
+                          : 'hover:border-blue-300 hover:shadow-sm'
+                          }`}
                       >
                         <div className="flex items-center gap-4">
-                          <div className={`p-3 rounded-lg ${
-                            selectedTemplateId === template.id ? 'bg-blue-200' : 'bg-blue-100'
-                          }`}>
+                          <div className={`p-3 rounded-lg ${selectedTemplateId === template.id ? 'bg-blue-200' : 'bg-blue-100'
+                            }`}>
                             <Copy className="w-5 h-5 text-blue-600" />
                           </div>
                           <div>
@@ -4784,79 +5268,91 @@ export default function Settings() {
                                 <Clock className="w-3 h-3" />
                                 ใช้ล่าสุด: {template.lastUsed}
                               </span>
-                              <span className={`px-2 py-0.5 rounded text-xs ${
-                                template.type === 'procurement' ? 'bg-green-100 text-green-700' :
+                              <span className={`px-2 py-0.5 rounded text-xs ${template.type === 'procurement' ? 'bg-green-100 text-green-700' :
                                 template.type === 'construction' ? 'bg-orange-100 text-orange-700' :
-                                template.type === 'service' ? 'bg-blue-100 text-blue-700' :
-                                template.type === 'consultant' ? 'bg-purple-100 text-purple-700' :
-                                template.type === 'rental' ? 'bg-yellow-100 text-yellow-700' :
-                                template.type === 'concession' ? 'bg-red-100 text-red-700' :
-                                template.type === 'software' ? 'bg-indigo-100 text-indigo-700' :
-                                template.type === 'energy' ? 'bg-amber-100 text-amber-700' :
-                                template.type === 'logistics' ? 'bg-cyan-100 text-cyan-700' :
-                                template.type === 'security' ? 'bg-rose-100 text-rose-700' :
-                                'bg-gray-100 text-gray-700'
-                              }`}>
+                                  template.type === 'service' ? 'bg-blue-100 text-blue-700' :
+                                    template.type === 'consultant' ? 'bg-purple-100 text-purple-700' :
+                                      template.type === 'rental' ? 'bg-yellow-100 text-yellow-700' :
+                                        template.type === 'concession' ? 'bg-red-100 text-red-700' :
+                                          template.type === 'software' ? 'bg-indigo-100 text-indigo-700' :
+                                            template.type === 'energy' ? 'bg-amber-100 text-amber-700' :
+                                              template.type === 'logistics' ? 'bg-cyan-100 text-cyan-700' :
+                                                template.type === 'security' ? 'bg-rose-100 text-rose-700' :
+                                                  'bg-gray-100 text-gray-700'
+                                }`}>
                                 {template.type === 'procurement' ? 'จัดซื้อ' :
-                                 template.type === 'construction' ? 'ก่อสร้าง' :
-                                 template.type === 'service' ? 'บริการ' :
-                                 template.type === 'consultant' ? 'ที่ปรึกษา' :
-                                 template.type === 'rental' ? 'เช่า' :
-                                 template.type === 'concession' ? 'สัมปทาน' :
-                                 template.type === 'maintenance' ? 'ซ่อม' :
-                                 template.type === 'training' ? 'อบรม' :
-                                 template.type === 'research' ? 'วิจัย' :
-                                 template.type === 'software' ? 'ไอที' :
-                                 template.type === 'land_sale' ? 'ที่ดิน' :
-                                 template.type === 'insurance' ? 'ประกัน' :
-                                 template.type === 'advertising' ? 'โฆษณา' :
-                                 template.type === 'medical' ? 'สาธารณสุข' :
-                                 template.type === 'agriculture' ? 'เกษตร' :
-                                 template.type === 'energy' ? 'พลังงาน' :
-                                 template.type === 'logistics' ? 'ขนส่ง' :
-                                 template.type === 'waste_management' ? 'ขยะ' :
-                                 template.type === 'water_management' ? 'น้ำ' :
-                                 template.type === 'catering' ? 'อาหาร' :
-                                 template.type === 'security' ? 'รปภ.' :
-                                 template.type === 'cleaning' ? 'ทำความสะอาด' :
-                                 template.type === 'printing' ? 'พิมพ์' :
-                                 template.type === 'telecom' ? 'โทรคมฯ' :
-                                 template.type === 'survey' ? 'สำรวจ' : template.type}
+                                  template.type === 'construction' ? 'ก่อสร้าง' :
+                                    template.type === 'service' ? 'บริการ' :
+                                      template.type === 'consultant' ? 'ที่ปรึกษา' :
+                                        template.type === 'rental' ? 'เช่า' :
+                                          template.type === 'concession' ? 'สัมปทาน' :
+                                            template.type === 'maintenance' ? 'ซ่อม' :
+                                              template.type === 'training' ? 'อบรม' :
+                                                template.type === 'research' ? 'วิจัย' :
+                                                  template.type === 'software' ? 'ไอที' :
+                                                    template.type === 'land_sale' ? 'ที่ดิน' :
+                                                      template.type === 'insurance' ? 'ประกัน' :
+                                                        template.type === 'advertising' ? 'โฆษณา' :
+                                                          template.type === 'medical' ? 'สาธารณสุข' :
+                                                            template.type === 'agriculture' ? 'เกษตร' :
+                                                              template.type === 'energy' ? 'พลังงาน' :
+                                                                template.type === 'logistics' ? 'ขนส่ง' :
+                                                                  template.type === 'waste_management' ? 'ขยะ' :
+                                                                    template.type === 'water_management' ? 'น้ำ' :
+                                                                      template.type === 'catering' ? 'อาหาร' :
+                                                                        template.type === 'security' ? 'รปภ.' :
+                                                                          template.type === 'cleaning' ? 'ทำความสะอาด' :
+                                                                            template.type === 'printing' ? 'พิมพ์' :
+                                                                              template.type === 'telecom' ? 'โทรคมฯ' :
+                                                                                template.type === 'survey' ? 'สำรวจ' : template.type}
                               </span>
                             </div>
                           </div>
                         </div>
-                        <div 
-                          className="flex items-center gap-2" 
+                        <div
+                          className="flex items-center gap-2"
                           style={{ pointerEvents: 'auto' }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <button 
+                          <button
                             onClick={(e) => {
                               e.stopPropagation()
                               handleSetDefaultTemplate(template.id)
                             }}
-                            className={`p-2 rounded-lg transition ${
-                              template.isDefault ? 'text-blue-600 bg-blue-50' : 'hover:bg-gray-100 text-gray-400'
-                            }`}
+                            className={`p-2 rounded-lg transition ${template.isDefault ? 'text-blue-600 bg-blue-50' : 'hover:bg-gray-100 text-gray-400'
+                              }`}
                             title="ตั้งเป็นค่าเริ่มต้น"
                             style={{ pointerEvents: 'auto', position: 'relative', zIndex: 10 }}
                           >
                             <CheckCircle className="w-4 h-4" />
                           </button>
-                          <button 
+                          <button
                             onClick={(e) => {
                               e.stopPropagation()
                               setSelectedTemplateId(template.id)
                             }}
-                            className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition" 
+                            className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition"
                             title="ดูตัวอย่าง"
                             style={{ pointerEvents: 'auto', position: 'relative', zIndex: 10 }}
                           >
                             <Eye className="w-4 h-4" />
                           </button>
+                          {(template.variables && template.variables.length > 0) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openDraftModal(template)
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 rounded-lg transition"
+                              title="ร่างสัญญา"
+                              style={{ pointerEvents: 'auto', position: 'relative', zIndex: 10 }}
+                            >
+                              <Edit3 className="w-3 h-3" />
+                              ร่างสัญญา
+                            </button>
+                          )}
                           {!template.isSystem && (
-                            <button 
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDeleteTemplate(template.id)
@@ -4879,13 +5375,24 @@ export default function Settings() {
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold text-gray-900">ตัวอย่าง Template ที่เลือก</h3>
                     {selectedTemplate && (
-                      <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition">
-                        <Copy className="w-4 h-4" />
-                        ใช้ Template นี้
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {selectedTemplate.variables && selectedTemplate.variables.length > 0 && (
+                          <button
+                            onClick={() => openDraftModal(selectedTemplate)}
+                            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                            ร่างสัญญา ({selectedTemplate.variables.length} ตัวแปร)
+                          </button>
+                        )}
+                        <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition">
+                          <Copy className="w-4 h-4" />
+                          ใช้ Template นี้
+                        </button>
+                      </div>
                     )}
                   </div>
-                  
+
                   {selectedTemplate ? (
                     <div className="bg-gray-50 rounded-lg p-6 border">
                       <h4 className="text-lg font-bold text-gray-900 text-center mb-6">
@@ -4925,7 +5432,7 @@ export default function Settings() {
                   )}
                 </div>
               </div>
-          )}
+            )}
 
             {/* Storage Settings - พื้นที่จัดเก็บสัญญา */}
             {activeTab === 'storage' && (
@@ -4942,6 +5449,232 @@ export default function Settings() {
             onSuccess={handleTemplateSuccess}
           />
         ) : null}
+
+        {/* Smart Import Modal */}
+        {showSmartImport && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between p-6 border-b">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="w-6 h-6 text-purple-600" />
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">นำเข้าสัญญา (Smart Import)</h2>
+                    <p className="text-sm text-gray-500">วาง/พิมพ์ข้อความสัญญาแล้ว AI จะสร้าง Template อัตโนมัติ</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowSmartImport(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6">
+                <textarea
+                  value={smartImportText}
+                  onChange={(e) => setSmartImportText(e.target.value)}
+                  placeholder="วางข้อความสัญญาที่นี่... เช่น สัญญาจ้างก่อสร้าง, สัญญาจัดซื้อ ฯลฯ&#10;&#10;AI จะวิเคราะห์และสร้าง Template โดยอัตโนมัติ รวมถึง:&#10;• ตัวแปร (เช่น ชื่อคู่สัญญา, มูลค่าสัญญา, วันที่)&#10;• ข้อสัญญาทางเลือก (ก/ข)&#10;• ข้อสัญญาที่ไม่บังคับ"
+                  rows={14}
+                  className="w-full border rounded-lg p-3 text-sm font-mono resize-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                />
+                <p className="text-xs text-gray-400 mt-2">
+                  ขนาดที่รองรับ: ข้อความสัญญาที่มีความยาวไม่เกิน ~20,000 ตัวอักษร
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 p-6 border-t">
+                <button
+                  onClick={() => setShowSmartImport(false)}
+                  className="px-4 py-2 text-gray-700 border rounded-lg hover:bg-gray-50 transition"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={handleSmartImport}
+                  disabled={smartImportLoading || !smartImportText.trim()}
+                  className="flex items-center gap-2 px-5 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {smartImportLoading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> AI กำลังประมวลผล...</>
+                  ) : (
+                    <><Sparkles className="w-4 h-4" /> นำเข้า Template</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Draft Contract Modal */}
+        {showDraftModal && draftTemplate && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between p-6 border-b">
+                <div className="flex items-center gap-3">
+                  <Edit3 className="w-6 h-6 text-green-600" />
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">ร่างสัญญา</h2>
+                    <p className="text-sm text-gray-500">{draftTemplate.name}</p>
+                  </div>
+                </div>
+                <button onClick={() => { setShowDraftModal(false); setDraftResult(null) }} className="p-2 hover:bg-gray-100 rounded-lg">
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6">
+                {draftResult ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-medium text-gray-900">สัญญาที่ร่างแล้ว</h3>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(draftResult)
+                          setMessage({ type: 'success', text: 'คัดลอกข้อความสัญญาแล้ว' })
+                        }}
+                        className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition"
+                      >
+                        <Copy className="w-4 h-4" />
+                        คัดลอก
+                      </button>
+                    </div>
+                    <pre className="bg-gray-50 rounded-lg p-4 text-sm leading-relaxed whitespace-pre-wrap font-sans border text-gray-800 max-h-[55vh] overflow-y-auto">
+                      {draftResult}
+                    </pre>
+                    <button
+                      onClick={() => setDraftResult(null)}
+                      className="mt-4 text-sm text-gray-500 hover:text-gray-700 underline"
+                    >
+                      ← กลับไปแก้ไขข้อมูล
+                    </button>
+                  </div>
+                ) : draftFetching ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-green-600 mr-3" />
+                    <span className="text-gray-500">กำลังโหลดข้อมูล Template...</span>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Variables */}
+                    {draftTemplate.variables && draftTemplate.variables.length > 0 && (
+                      <div>
+                        <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-blue-600" />
+                          ข้อมูลที่ต้องกรอก ({draftTemplate.variables.length} รายการ)
+                        </h3>
+                        <div className="grid grid-cols-1 gap-4">
+                          {draftTemplate.variables.map((v) => (
+                            <div key={v.key}>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                {v.label}
+                                {v.required && <span className="text-red-500 ml-1">*</span>}
+                                {v.description && <span className="text-gray-400 font-normal ml-1">({v.description})</span>}
+                              </label>
+                              {v.type === 'select' && v.options ? (
+                                <select
+                                  value={draftVarValues[v.key] || ''}
+                                  onChange={(e) => setDraftVarValues(prev => ({ ...prev, [v.key]: e.target.value }))}
+                                  className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500"
+                                >
+                                  <option value="">-- เลือก --</option>
+                                  {v.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                </select>
+                              ) : (
+                                <input
+                                  type={v.type === 'date' ? 'date' : v.type === 'number' ? 'number' : 'text'}
+                                  value={draftVarValues[v.key] || ''}
+                                  onChange={(e) => setDraftVarValues(prev => ({ ...prev, [v.key]: e.target.value }))}
+                                  placeholder={v.default || `กรอก${v.label}`}
+                                  className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500"
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Conditional Groups */}
+                    {draftTemplate.conditionalGroups && draftTemplate.conditionalGroups.length > 0 && (
+                      <div>
+                        <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                          <Sliders className="w-4 h-4 text-purple-600" />
+                          ข้อสัญญาทางเลือก
+                        </h3>
+                        <div className="space-y-4">
+                          {draftTemplate.conditionalGroups.map((group) => (
+                            <div key={group.key} className="border rounded-lg p-4 bg-purple-50">
+                              <p className="text-sm font-medium text-gray-800 mb-2">{group.label}</p>
+                              <div className="flex flex-wrap gap-2">
+                                {group.options.map(opt => (
+                                  <label key={opt.value} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition ${draftConditionals[group.key] === opt.value ? 'border-purple-500 bg-white shadow-sm' : 'border-gray-200 bg-white hover:border-purple-300'}`}>
+                                    <input
+                                      type="radio"
+                                      name={`cond_${group.key}`}
+                                      value={opt.value}
+                                      checked={draftConditionals[group.key] === opt.value}
+                                      onChange={() => setDraftConditionals(prev => ({ ...prev, [group.key]: opt.value }))}
+                                      className="accent-purple-600"
+                                    />
+                                    <span className="text-sm">{opt.label}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Optional clauses (shown if template has clauses_data) */}
+                    {draftTemplate.clauses_data && draftTemplate.clauses_data.some(c => c.optional) && (
+                      <div>
+                        <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                          <CheckCircle className="w-4 h-4 text-orange-600" />
+                          ข้อสัญญาที่ไม่บังคับ (เลือกรวม/ไม่รวม)
+                        </h3>
+                        <div className="space-y-2">
+                          {draftTemplate.clauses_data.filter(c => c.optional).map((clause, idx) => (
+                            <label key={idx} className="flex items-start gap-3 p-3 border rounded-lg hover:bg-orange-50 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={draftOptional[String(clause.number)] !== false}
+                                onChange={(e) => setDraftOptional(prev => ({ ...prev, [String(clause.number)]: e.target.checked }))}
+                                className="mt-0.5 accent-orange-600"
+                              />
+                              <div>
+                                <p className="text-sm font-medium text-gray-800">ข้อ {clause.number}: {clause.title}</p>
+                                <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{clause.content?.substring(0, 120)}...</p>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {!draftResult && (
+                <div className="flex items-center justify-end gap-3 p-6 border-t">
+                  <button
+                    onClick={() => setShowDraftModal(false)}
+                    className="px-4 py-2 text-gray-700 border rounded-lg hover:bg-gray-50 transition"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    onClick={handleDraftContract}
+                    disabled={draftLoading || draftFetching}
+                    className="flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {draftLoading ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> กำลังสร้างสัญญา...</>
+                    ) : (
+                      <><Edit3 className="w-4 h-4" /> ร่างสัญญา</>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )
@@ -4950,8 +5683,8 @@ export default function Settings() {
 // Storage Settings Component - 2 Sections: MinIO (Files) & RAG (Content)
 function StorageSettings() {
   const [activeStorageTab, setActiveStorageTab] = useState<'minio' | 'rag'>('minio')
-  const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
-  
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+
   // MinIO State - เก็บไฟล์ตัวจริง
   const [minioStats, setMinioStats] = useState({
     totalSize: 0,
@@ -4969,7 +5702,7 @@ function StorageSettings() {
   })
   const [showMinioKeys, setShowMinioKeys] = useState(false)
   const [minioLoading, setMinioLoading] = useState(true)
-  
+
   // RAG State - เก็บ content ที่ได้จากการประมวลผล
   const [ragStats, setRagStats] = useState({
     totalChunks: 0,
@@ -4992,7 +5725,7 @@ function StorageSettings() {
   })
   const [showRagKey, setShowRagKey] = useState(false)
   const [ragLoading, setRagLoading] = useState(true)
-  
+
   // Common Retention Settings
   const [retentionDays, setRetentionDays] = useState(2555) // 7 years default
   const [autoCleanup, setAutoCleanup] = useState(false)
@@ -5080,7 +5813,7 @@ function StorageSettings() {
       const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/minio/config', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
@@ -5107,7 +5840,7 @@ function StorageSettings() {
       const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/rag/config', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
@@ -5134,7 +5867,7 @@ function StorageSettings() {
       const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/minio/test', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
@@ -5162,7 +5895,7 @@ function StorageSettings() {
       const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/rag/test', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
@@ -5188,7 +5921,7 @@ function StorageSettings() {
   const handleSyncRag = async () => {
     try {
       const token = localStorage.getItem('access_token')
-      const response = await fetch('/api/v1/admin/storage/rag/sync', { 
+      const response = await fetch('/api/v1/admin/storage/rag/sync', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -5224,7 +5957,7 @@ function StorageSettings() {
     if (!confirm('คุณต้องการล้างข้อมูล RAG ใช่หรือไม่?\n\nข้อมูลไฟล์ใน MinIO จะไม่ถูกลบ แต่ OCR จะถูกรีเซ็ตให้ประมวลผลใหม่ได้')) {
       return
     }
-    
+
     try {
       const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/rag/clear?confirm=true', {
@@ -5255,17 +5988,69 @@ function StorageSettings() {
     }
   }
 
+  // Clear ALL contract data (contracts DB + MinIO + GraphRAG + vector_chunks)
+  const handleClearAllContracts = async () => {
+    const first = confirm(
+      '⚠️ คำเตือน: ล้างข้อมูลสัญญาทั้งหมด\n\n' +
+      'การกระทำนี้จะ:\n' +
+      '• ลบสัญญาทั้งหมดออกจากฐานข้อมูล (ถาวร)\n' +
+      '• ลบไฟล์ทั้งหมดออกจาก MinIO\n' +
+      '• ล้าง GraphRAG (Neo4j) ทั้งหมด\n' +
+      '• ล้าง Vector chunks (RAG) ทั้งหมด\n\n' +
+      '⛔ ไม่สามารถกู้คืนได้ — คุณแน่ใจหรือไม่?'
+    )
+    if (!first) return
+
+    const second = confirm('ยืนยันอีกครั้ง: ลบข้อมูลสัญญาทั้งหมดถาวร ใช่หรือไม่?')
+    if (!second) return
+
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch('/api/v1/admin/contracts/clear-all?confirm=true', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
+
+      if (response.status === 403) {
+        setMessage({ type: 'error', text: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่' })
+        setTimeout(() => window.location.href = '/login', 2000)
+        return
+      }
+
+      if (response.ok) {
+        const r = await response.json()
+        const graphPart = r.deleted_graph_entities > 0
+          ? `, Graph: ${r.deleted_graph_entities} entities, ${r.deleted_graph_relationships} relations`
+          : ''
+        const vecPart = r.deleted_vector_chunks > 0 ? `, Vector: ${r.deleted_vector_chunks} chunks` : ''
+        setMessage({
+          type: 'success',
+          text: `ล้างสำเร็จ: ${r.deleted_contracts} สัญญา, ${r.deleted_minio_files} ไฟล์${vecPart}${graphPart}`,
+        })
+        fetchMinioStats()
+        fetchRagStats()
+        setTimeout(() => setMessage(null), 5000)
+      } else {
+        const error = await response.json()
+        setMessage({ type: 'error', text: error.detail || 'ไม่สามารถล้างข้อมูลสัญญาได้' })
+      }
+    } catch (err) {
+      console.error('Failed to clear all contracts:', err)
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการล้างข้อมูลสัญญา' })
+    }
+  }
+
   // Clear All Storage (MinIO + RAG + GraphRAG)
   const handleClearAllStorage = async () => {
     if (!confirm('⚠️ คำเตือน: การล้างข้อมูลทั้งหมด\n\nการกระทำนี้จะ:\n• ลบไฟล์ทั้งหมดจาก MinIO\n• ลบข้อมูล RAG ทั้งหมด\n• ลบ GraphRAG (Entities, Relationships) ทั้งหมด\n• ไฟล์จะถูก soft-delete (สามารถกู้คืนจาก Database ได้)\n\nคุณแน่ใจหรือไม่?')) {
       return
     }
-    
+
     // Second confirmation
     if (!confirm('ยืนยันอีกครั้ง: ต้องการลบไฟล์ทั้งหมดจริงๆ ใช่หรือไม่?')) {
       return
     }
-    
+
     try {
       const token = localStorage.getItem('access_token')
       const response = await fetch('/api/v1/admin/storage/minio/clear?confirm=true', {
@@ -5283,8 +6068,8 @@ function StorageSettings() {
 
       if (response.ok) {
         const result = await response.json()
-        const graphMsg = result.deleted_graph_entities > 0 
-          ? `, Graph: ${result.deleted_graph_entities} entities, ${result.deleted_graph_relationships} relations` 
+        const graphMsg = result.deleted_graph_entities > 0
+          ? `, Graph: ${result.deleted_graph_entities} entities, ${result.deleted_graph_relationships} relations`
           : ''
         setMessage({ type: 'success', text: `ล้างข้อมูลสำเร็จ: ${result.deleted_files || 0} ไฟล์${graphMsg}` })
         fetchMinioStats()
@@ -5364,7 +6149,7 @@ function StorageSettings() {
 
   const handleDeleteSelectedFiles = async () => {
     if (selectedFiles.size === 0) return
-    
+
     if (!confirm(`คุณต้องการลบไฟล์ที่เลือก ${selectedFiles.size} รายการใช่หรือไม่?`)) {
       return
     }
@@ -5485,9 +6270,8 @@ function StorageSettings() {
         </div>
 
         {message && (
-          <div className={`p-3 rounded-lg flex items-center gap-2 ${
-            message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-          }`}>
+          <div className={`p-3 rounded-lg flex items-center gap-2 ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+            }`}>
             {message.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
             {message.text}
           </div>
@@ -5499,11 +6283,10 @@ function StorageSettings() {
         <div className="flex gap-2">
           <button
             onClick={() => setActiveStorageTab('minio')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition ${
-              activeStorageTab === 'minio'
-                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                : 'hover:bg-gray-50 text-gray-600'
-            }`}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition ${activeStorageTab === 'minio'
+              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+              : 'hover:bg-gray-50 text-gray-600'
+              }`}
           >
             <FileArchive className="w-5 h-5" />
             <div className="text-left">
@@ -5513,11 +6296,10 @@ function StorageSettings() {
           </button>
           <button
             onClick={() => setActiveStorageTab('rag')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition ${
-              activeStorageTab === 'rag'
-                ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                : 'hover:bg-gray-50 text-gray-600'
-            }`}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition ${activeStorageTab === 'rag'
+              ? 'bg-purple-50 text-purple-700 border border-purple-200'
+              : 'hover:bg-gray-50 text-gray-600'
+              }`}
           >
             <BrainCircuit className="w-5 h-5" />
             <div className="text-left">
@@ -5537,7 +6319,7 @@ function StorageSettings() {
               <DatabaseBackup className="w-5 h-5 text-blue-600" />
               <h3 className="text-lg font-semibold text-gray-900">สถิติการใช้งาน (Object Storage)</h3>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
                 <p className="text-sm text-gray-600 mb-1">พื้นที่ใช้งานทั้งหมด</p>
@@ -5571,7 +6353,7 @@ function StorageSettings() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">ประเภท Storage</label>
                   <select
                     value={minioConfig.type}
-                    onChange={(e) => setMinioConfig({...minioConfig, type: e.target.value})}
+                    onChange={(e) => setMinioConfig({ ...minioConfig, type: e.target.value })}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="minio">MinIO (Local)</option>
@@ -5585,7 +6367,7 @@ function StorageSettings() {
                   <input
                     type="text"
                     value={minioConfig.bucket}
-                    onChange={(e) => setMinioConfig({...minioConfig, bucket: e.target.value})}
+                    onChange={(e) => setMinioConfig({ ...minioConfig, bucket: e.target.value })}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
@@ -5596,7 +6378,7 @@ function StorageSettings() {
                 <input
                   type="text"
                   value={minioConfig.endpoint}
-                  onChange={(e) => setMinioConfig({...minioConfig, endpoint: e.target.value})}
+                  onChange={(e) => setMinioConfig({ ...minioConfig, endpoint: e.target.value })}
                   placeholder="minio:9000 หรือ s3.amazonaws.com"
                   className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
@@ -5608,7 +6390,7 @@ function StorageSettings() {
                   <input
                     type={showMinioKeys ? 'text' : 'password'}
                     value={minioConfig.accessKey}
-                    onChange={(e) => setMinioConfig({...minioConfig, accessKey: e.target.value})}
+                    onChange={(e) => setMinioConfig({ ...minioConfig, accessKey: e.target.value })}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
@@ -5617,7 +6399,7 @@ function StorageSettings() {
                   <input
                     type={showMinioKeys ? 'text' : 'password'}
                     value={minioConfig.secretKey}
-                    onChange={(e) => setMinioConfig({...minioConfig, secretKey: e.target.value})}
+                    onChange={(e) => setMinioConfig({ ...minioConfig, secretKey: e.target.value })}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
@@ -5659,19 +6441,37 @@ function StorageSettings() {
               <AlertTriangle className="w-5 h-5 text-red-600" />
               <h3 className="text-lg font-semibold text-red-900">Danger Zone</h3>
             </div>
-            
+
             <div className="space-y-4">
+              {/* Clear contracts (DB + MinIO + GraphRAG + vector) */}
+              <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-200">
+                <div>
+                  <p className="font-medium text-red-900">ล้างพื้นที่จัดเก็บสัญญา</p>
+                  <p className="text-sm text-red-600">
+                    ลบสัญญาทั้งหมดออกจาก DB, ไฟล์ MinIO, GraphRAG (Neo4j), และ Vector chunks — ถาวร
+                  </p>
+                </div>
+                <button
+                  onClick={handleClearAllContracts}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition whitespace-nowrap"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  ล้างสัญญาทั้งหมด
+                </button>
+              </div>
+
+              {/* Clear storage only (MinIO + RAG + GraphRAG, no contract rows) */}
               <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-100">
                 <div>
-                  <p className="font-medium text-red-900">ล้างข้อมูลทั้งหมด</p>
-                  <p className="text-sm text-red-600">ลบไฟล์ทั้งหมดจาก MinIO, RAG, และ GraphRAG (ไม่สามารถกู้คืนได้)</p>
+                  <p className="font-medium text-red-900">ล้างพื้นที่จัดเก็บไฟล์</p>
+                  <p className="text-sm text-red-600">ลบไฟล์ทั้งหมดจาก MinIO, RAG, และ GraphRAG (ไม่ลบข้อมูลสัญญาใน DB)</p>
                 </div>
                 <button
                   onClick={handleClearAllStorage}
-                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition whitespace-nowrap"
                 >
                   <Trash2 className="w-4 h-4" />
-                  ล้างข้อมูลทั้งหมด
+                  ล้างไฟล์ทั้งหมด
                 </button>
               </div>
             </div>
@@ -5688,7 +6488,7 @@ function StorageSettings() {
               <Layers className="w-5 h-5 text-purple-600" />
               <h3 className="text-lg font-semibold text-gray-900">สถิติการใช้งาน (Vector Storage)</h3>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
                 <p className="text-sm text-gray-600 mb-1">จำนวน Chunks</p>
@@ -5726,7 +6526,7 @@ function StorageSettings() {
                   <input
                     type="checkbox"
                     checked={ragConfig.enabled}
-                    onChange={(e) => setRagConfig({...ragConfig, enabled: e.target.checked})}
+                    onChange={(e) => setRagConfig({ ...ragConfig, enabled: e.target.checked })}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
@@ -5738,7 +6538,7 @@ function StorageSettings() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Vector Database Provider</label>
                   <select
                     value={ragConfig.provider}
-                    onChange={(e) => setRagConfig({...ragConfig, provider: e.target.value})}
+                    onChange={(e) => setRagConfig({ ...ragConfig, provider: e.target.value })}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                   >
                     <option value="pgvector">PostgreSQL pgvector (Local)</option>
@@ -5753,7 +6553,7 @@ function StorageSettings() {
                   <input
                     type="text"
                     value={ragConfig.indexName}
-                    onChange={(e) => setRagConfig({...ragConfig, indexName: e.target.value})}
+                    onChange={(e) => setRagConfig({ ...ragConfig, indexName: e.target.value })}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                   />
                 </div>
@@ -5765,7 +6565,7 @@ function StorageSettings() {
                   <input
                     type="number"
                     value={ragConfig.chunkSize}
-                    onChange={(e) => setRagConfig({...ragConfig, chunkSize: parseInt(e.target.value)})}
+                    onChange={(e) => setRagConfig({ ...ragConfig, chunkSize: parseInt(e.target.value) })}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                   />
                   <p className="text-xs text-gray-500 mt-1">จำนวนตัวอักษรต่อ chunk</p>
@@ -5775,7 +6575,7 @@ function StorageSettings() {
                   <input
                     type="number"
                     value={ragConfig.chunkOverlap}
-                    onChange={(e) => setRagConfig({...ragConfig, chunkOverlap: parseInt(e.target.value)})}
+                    onChange={(e) => setRagConfig({ ...ragConfig, chunkOverlap: parseInt(e.target.value) })}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                   />
                   <p className="text-xs text-gray-500 mt-1">จำนวนตัวอักษรทับซ้อนกัน</p>
@@ -5786,7 +6586,7 @@ function StorageSettings() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Embedding Model</label>
                 <select
                   value={ragConfig.embeddingModel}
-                  onChange={(e) => setRagConfig({...ragConfig, embeddingModel: e.target.value})}
+                  onChange={(e) => setRagConfig({ ...ragConfig, embeddingModel: e.target.value })}
                   className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                 >
                   <option value="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2">MiniLM-L12 (384 dim) - แนะนำ</option>
@@ -5802,13 +6602,13 @@ function StorageSettings() {
               {ragConfig.provider !== 'pgvector' && ragConfig.provider !== 'chroma' && (
                 <div className="space-y-4 p-4 bg-gray-50 rounded-lg">
                   <h4 className="font-medium text-gray-900">ตั้งค่า External Provider</h4>
-                  
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">API Key</label>
                     <input
                       type={showRagKey ? 'text' : 'password'}
                       value={ragConfig.apiKey}
-                      onChange={(e) => setRagConfig({...ragConfig, apiKey: e.target.value})}
+                      onChange={(e) => setRagConfig({ ...ragConfig, apiKey: e.target.value })}
                       className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                     />
                   </div>
@@ -5819,7 +6619,7 @@ function StorageSettings() {
                       <input
                         type="text"
                         value={ragConfig.environment}
-                        onChange={(e) => setRagConfig({...ragConfig, environment: e.target.value})}
+                        onChange={(e) => setRagConfig({ ...ragConfig, environment: e.target.value })}
                         placeholder="us-west1-gcp"
                         className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                       />
@@ -5831,7 +6631,7 @@ function StorageSettings() {
                     <input
                       type="text"
                       value={ragConfig.endpoint}
-                      onChange={(e) => setRagConfig({...ragConfig, endpoint: e.target.value})}
+                      onChange={(e) => setRagConfig({ ...ragConfig, endpoint: e.target.value })}
                       placeholder="https://api.example.com"
                       className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                     />
@@ -5882,7 +6682,7 @@ function StorageSettings() {
               <AlertTriangle className="w-5 h-5 text-red-600" />
               <h3 className="text-lg font-semibold text-red-900">Danger Zone - RAG Only</h3>
             </div>
-            
+
             <div className="space-y-4">
               <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-100">
                 <div>
@@ -6023,11 +6823,10 @@ function StorageSettings() {
                     {fileList.map((file) => (
                       <div
                         key={file.id}
-                        className={`flex items-center gap-4 p-4 rounded-lg border transition ${
-                          selectedFiles.has(file.id)
-                            ? 'bg-blue-50 border-blue-300'
-                            : 'bg-white border-gray-200 hover:bg-gray-50'
-                        }`}
+                        className={`flex items-center gap-4 p-4 rounded-lg border transition ${selectedFiles.has(file.id)
+                          ? 'bg-blue-50 border-blue-300'
+                          : 'bg-white border-gray-200 hover:bg-gray-50'
+                          }`}
                       >
                         <input
                           type="checkbox"
@@ -6035,7 +6834,7 @@ function StorageSettings() {
                           onChange={() => toggleFileSelection(file.id)}
                           className="w-4 h-4 text-blue-600 rounded"
                         />
-                        
+
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <FileText className="w-4 h-4 text-gray-400" />
@@ -6058,18 +6857,17 @@ function StorageSettings() {
 
                         <div className="flex items-center gap-2">
                           {/* Status Badge */}
-                          <span className={`px-2 py-1 text-xs rounded-full ${
-                            file.ocr_status === 'completed' ? 'bg-green-100 text-green-700' :
+                          <span className={`px-2 py-1 text-xs rounded-full ${file.ocr_status === 'completed' ? 'bg-green-100 text-green-700' :
                             file.ocr_status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
-                            file.ocr_status === 'failed' ? 'bg-red-100 text-red-700' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>
+                              file.ocr_status === 'failed' ? 'bg-red-100 text-red-700' :
+                                'bg-gray-100 text-gray-600'
+                            }`}>
                             {file.ocr_status === 'completed' ? 'ประมวลผลแล้ว' :
-                             file.ocr_status === 'processing' ? 'กำลังประมวลผล' :
-                             file.ocr_status === 'failed' ? 'ล้มเหลว' :
-                             'รอดำเนินการ'}
+                              file.ocr_status === 'processing' ? 'กำลังประมวลผล' :
+                                file.ocr_status === 'failed' ? 'ล้มเหลว' :
+                                  'รอดำเนินการ'}
                           </span>
-                          
+
                           {/* Action Buttons */}
                           {(file.ocr_status === 'pending' || file.ocr_status === 'failed') && (
                             <button
@@ -6086,7 +6884,7 @@ function StorageSettings() {
                               ดำเนินการ
                             </button>
                           )}
-                          
+
                           {file.ocr_status === 'completed' && (
                             <button
                               onClick={() => handleCreateGraph(file.id)}
@@ -6162,7 +6960,7 @@ function StorageSettings() {
   )
 }
 
-function StatusCard({ icon, title, value, subtitle, color, status }: { 
+function StatusCard({ icon, title, value, subtitle, color, status }: {
   icon: React.ReactNode
   title: string
   value: string
@@ -6200,7 +6998,7 @@ function StatusCard({ icon, title, value, subtitle, color, status }: {
   )
 }
 
-function EndpointStatus({ name, method, path, status }: { 
+function EndpointStatus({ name, method, path, status }: {
   name: string
   method: string
   path: string
@@ -6209,13 +7007,12 @@ function EndpointStatus({ name, method, path, status }: {
   return (
     <div className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
       <div className="flex items-center gap-4">
-        <span className={`px-2 py-1 text-xs font-medium rounded ${
-          method === 'GET' ? 'bg-green-100 text-green-700' :
+        <span className={`px-2 py-1 text-xs font-medium rounded ${method === 'GET' ? 'bg-green-100 text-green-700' :
           method === 'POST' ? 'bg-blue-100 text-blue-700' :
-          method === 'PUT' ? 'bg-yellow-100 text-yellow-700' :
-          method === 'DELETE' ? 'bg-red-100 text-red-700' :
-          'bg-gray-100 text-gray-700'
-        }`}>
+            method === 'PUT' ? 'bg-yellow-100 text-yellow-700' :
+              method === 'DELETE' ? 'bg-red-100 text-red-700' :
+                'bg-gray-100 text-gray-700'
+          }`}>
           {method}
         </span>
         <div>

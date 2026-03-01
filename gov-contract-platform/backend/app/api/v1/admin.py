@@ -656,7 +656,7 @@ async def clear_all_storage(
         db.commit()
         
         logger.warning(f"All storage cleared by {user_payload.get('sub')}: {deleted_files} files deleted")
-        
+
         return {
             "success": True,
             "message": "All storage cleared successfully",
@@ -672,3 +672,115 @@ async def clear_all_storage(
         logger.error(f"Failed to clear all storage: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to clear storage: {str(e)}")
+
+
+@router.post("/contracts/clear-all")
+async def clear_all_contracts(
+    confirm: bool = Query(False, description="Must be true to execute"),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload),
+):
+    """
+    Permanently clear ALL contract data:
+    - Delete all MinIO files (contract attachments)
+    - Hard-delete all Contract rows (cascades to attachments, milestones, payments, changes, audit_logs)
+    - Clear Neo4j GraphRAG Contracts domain (entities + relationships)
+    - Clear vector_chunks for the system contracts KB
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Set confirm=true to execute this destructive operation",
+        )
+
+    user_id = user_payload.get("sub")
+    storage = get_storage_service()
+
+    stats = {
+        "deleted_minio_files": 0,
+        "failed_minio_files": 0,
+        "deleted_contracts": 0,
+        "deleted_vector_chunks": 0,
+        "deleted_graph_entities": 0,
+        "deleted_graph_documents": 0,
+        "deleted_graph_relationships": 0,
+        "errors": [],
+    }
+
+    try:
+        from app.models.contract import Contract, ContractAttachment
+        from sqlalchemy import text
+
+        # ── 1. Collect MinIO paths BEFORE deleting DB rows ────────────────
+        attachments = db.query(ContractAttachment).all()
+        minio_paths = [a.storage_path for a in attachments if a.storage_path]
+        stats["deleted_contracts"] = db.query(Contract).count()
+
+        # ── 2. Delete files from MinIO ─────────────────────────────────────
+        for path in minio_paths:
+            try:
+                storage.delete_file(path)
+                stats["deleted_minio_files"] += 1
+            except Exception as e:
+                stats["failed_minio_files"] += 1
+                stats["errors"].append(f"MinIO {path}: {e}")
+
+        # ── 3. Hard-delete all contracts via TRUNCATE CASCADE ──────────────
+        # Order matters: children first, then parent
+        child_tables = [
+            "contract_audit_logs",
+            "contract_changes",
+            "contract_payments",
+            "contract_milestones",
+            "contract_attachments",
+        ]
+        for table in child_tables:
+            try:
+                db.execute(text(f"DELETE FROM {table}"))
+            except Exception as e:
+                logger.warning(f"Could not delete from {table}: {e}")
+        db.execute(text("DELETE FROM contracts"))
+        db.commit()
+
+        # ── 4. Clear vector_chunks for system contracts KB ─────────────────
+        try:
+            result = db.execute(
+                text("DELETE FROM vector_chunks WHERE kb_id = :kb_id"),
+                {"kb_id": "system-contracts-kb"},
+            )
+            stats["deleted_vector_chunks"] = result.rowcount
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Could not clear vector_chunks: {e}")
+            stats["errors"].append(f"vector_chunks: {e}")
+
+        # ── 5. Clear Neo4j GraphRAG Contracts domain ───────────────────────
+        try:
+            from app.services.graph import get_contracts_graph_service
+            graph_service = get_contracts_graph_service()
+            graph_deleted = graph_service.clear_all_data()
+            stats["deleted_graph_entities"] = graph_deleted.get("deleted_entities", 0)
+            stats["deleted_graph_documents"] = graph_deleted.get("deleted_documents", 0)
+            stats["deleted_graph_relationships"] = graph_deleted.get("deleted_relationships", 0)
+        except Exception as e:
+            logger.warning(f"Could not clear GraphRAG: {e}")
+            stats["errors"].append(f"GraphRAG: {e}")
+
+        logger.warning(
+            f"[clear_all_contracts] by {user_id}: "
+            f"{stats['deleted_contracts']} contracts, "
+            f"{stats['deleted_minio_files']} MinIO files, "
+            f"{stats['deleted_vector_chunks']} vector chunks, "
+            f"graph: {stats['deleted_graph_entities']} entities"
+        )
+
+        return {
+            "success": True,
+            "message": "ล้างข้อมูลสัญญาทั้งหมดสำเร็จ",
+            **stats,
+        }
+
+    except Exception as e:
+        logger.error(f"clear_all_contracts failed: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"ล้างข้อมูลไม่สำเร็จ: {e}")

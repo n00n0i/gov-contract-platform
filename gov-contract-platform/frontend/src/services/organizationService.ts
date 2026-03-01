@@ -106,6 +106,11 @@ export const updatePosition = async (id: string, data: Partial<Position>) => {
   return response.data
 }
 
+export const deletePosition = async (id: string) => {
+  const response = await api.delete(`/organization/positions/${id}`)
+  return response.data
+}
+
 // User Assignment
 export const assignUserToOrg = async (user_id: string, org_unit_id?: string, position_id?: string) => {
   const response = await api.post('/organization/assign-user', {

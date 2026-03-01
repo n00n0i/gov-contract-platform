@@ -8,7 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
+from datetime import datetime
+from pydantic import BaseModel
+import uuid
 import io
+import re
+import json
+import logging as _logging
 
 from app.db.database import get_db
 from app.schemas.document import (
@@ -45,6 +51,8 @@ async def upload_document(
     description: Optional[str] = Form(None),
     contract_id: Optional[str] = Form(None),
     vendor_id: Optional[str] = Form(None),
+    is_draft: bool = Form(True),
+    is_main_document: bool = Form(False),
     doc_service: DocumentService = Depends(get_doc_service),
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
@@ -71,11 +79,13 @@ async def upload_document(
             document_type=document_type,
             description=description,
             contract_id=contract_id,
-            vendor_id=vendor_id
+            vendor_id=vendor_id,
+            is_draft=is_draft,
+            is_main_document=is_main_document,
         )
         
         # Upload document
-        document = doc_service.upload_document(
+        document = await doc_service.upload_document(
             file=file_obj,
             filename=file.filename,
             content_type=file.content_type,
@@ -112,6 +122,326 @@ async def upload_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Upload failed: {str(e)}"
         )
+
+
+DEFAULT_EXTRACTION_PROMPT = (
+    "สกัดข้อมูลสัญญาจากข้อความ OCR ต่อไปนี้ ตอบในรูปแบบ JSON เท่านั้น ห้ามมีข้อความอื่น:\n"
+    "{\n"
+    '  "contract_number": "เลขที่สัญญา (ถ้าไม่พบ ให้ใส่ null)",\n'
+    '  "title": "ชื่อโครงการ/สัญญา",\n'
+    '  "counterparty": "ชื่อผู้รับจ้าง/คู่สัญญา",\n'
+    '  "contract_type": "service|construction|procurement|consulting|other",\n'
+    '  "contract_value": 0.0,\n'
+    '  "project_name": "ชื่อโครงการ",\n'
+    '  "start_date": "YYYY-MM-DD หรือ null",\n'
+    '  "end_date": "YYYY-MM-DD หรือ null"\n'
+    "}\n\n"
+    "ข้อความ OCR:\n"
+)
+
+
+async def _llm_extract_for_document(
+    db,
+    user_id: str,
+    llm_provider_id: Optional[str],
+    ocr_text: str,
+    custom_prompt: Optional[str],
+) -> dict:
+    """Extract structured contract data from OCR text using LLM."""
+    import httpx
+    from app.models.identity import User
+    from app.models.ai_provider import AIProvider
+
+    provider = None
+    if llm_provider_id:
+        provider = db.query(AIProvider).filter(
+            AIProvider.id == llm_provider_id,
+            AIProvider.user_id == user_id,
+        ).first()
+    if not provider:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and getattr(user, "active_llm_provider_id", None):
+            provider = db.query(AIProvider).filter(
+                AIProvider.id == user.active_llm_provider_id
+            ).first()
+    if not provider:
+        provider = db.query(AIProvider).filter(
+            AIProvider.user_id == user_id,
+            AIProvider.is_active == True,
+        ).first()
+    if not provider:
+        return {}
+
+    prompt_text = custom_prompt if custom_prompt else DEFAULT_EXTRACTION_PROMPT
+    full_prompt = f"{prompt_text}\n{ocr_text[:4000]}"
+
+    base_url = (provider.api_url or "").rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-3]
+    headers: dict = {"Content-Type": "application/json"}
+    if provider.api_key:
+        headers["Authorization"] = f"Bearer {provider.api_key}"
+    model = getattr(provider, "model", None) or getattr(provider, "model_name", None) or ""
+    provider_type = getattr(provider, "provider_type", "") or ""
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            if "ollama" in provider_type or "ollama" in base_url:
+                r = await client.post(
+                    f"{base_url}/api/generate",
+                    json={"model": model, "prompt": full_prompt, "stream": False},
+                    headers=headers,
+                )
+                text = r.json().get("response", "")
+            else:
+                r = await client.post(
+                    f"{base_url}/v1/chat/completions",
+                    json={
+                        "model": model or "gpt-3.5-turbo",
+                        "messages": [{"role": "user", "content": full_prompt}],
+                        "temperature": 0.1,
+                    },
+                    headers=headers,
+                )
+                text = r.json()["choices"][0]["message"]["content"]
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+    except Exception as e:
+        logger.warning(f"LLM extraction failed in preview: {e}")
+    return {}
+
+
+@router.post("/ocr-preview")
+async def ocr_preview(
+    file: UploadFile = File(...),
+    llm_provider_id: Optional[str] = Form(None),
+    extraction_prompt: Optional[str] = Form(None),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload),
+):
+    """
+    Preview OCR + LLM extraction WITHOUT creating a DB record.
+    Uploads file to MinIO (under documents/preview/), runs OCR,
+    runs LLM extraction, returns all data for user review.
+    """
+    from app.services.storage.minio_service import get_storage_service
+    from app.services.document.ocr_service import OCRService
+    from app.services.document.ocr_settings_service import get_ocr_settings_service
+
+    content = await file.read()
+    tenant_id = user_payload.get("tenant_id", "default")
+
+    storage = get_storage_service()
+    upload_result = storage.upload_file(
+        file_data=io.BytesIO(content),
+        filename=file.filename,
+        content_type=file.content_type or "application/octet-stream",
+        folder=f"tenant_{tenant_id}/documents/preview",
+        metadata={"preview": "true", "uploaded_by": user_id},
+    )
+
+    ocr_text = ""
+    page_count = 1
+    ocr_engine = "unknown"
+    ocr_error = None
+    try:
+        ocr_settings = get_ocr_settings_service(db=db, user_id=user_id)
+        ocr_svc = OCRService(ocr_settings_service=ocr_settings)
+        result = ocr_svc.process_document(content, file.content_type or "application/octet-stream")
+        if result.success:
+            ocr_text = result.text or ""
+            page_count = result.pages or 1
+            ocr_engine = result.ocr_engine or "tesseract/pdfplumber"
+        else:
+            ocr_error = result.error
+            logger.warning(f"OCR failed in preview: {result.error}")
+    except Exception as e:
+        ocr_error = str(e)
+        logger.warning(f"OCR exception in preview: {e}")
+
+    extracted_data: dict = {}
+    llm_error = None
+    if ocr_text:
+        try:
+            extracted_data = await _llm_extract_for_document(
+                db, user_id, llm_provider_id, ocr_text, extraction_prompt
+            )
+        except Exception as e:
+            llm_error = str(e)
+            logger.warning(f"LLM extraction failed: {e}")
+    else:
+        llm_error = "ไม่มีข้อความ OCR — ข้ามการถอดข้อมูล LLM"
+
+    return {
+        "success": True,
+        "data": {
+            "storage_path": upload_result["storage_path"],
+            "storage_bucket": upload_result["storage_bucket"],
+            "filename": file.filename,
+            "file_size": len(content),
+            "mime_type": file.content_type or "application/octet-stream",
+            "extracted_text": ocr_text,
+            "extracted_data": extracted_data,
+            "page_count": page_count,
+            "ocr_engine": ocr_engine,
+            "ocr_error": ocr_error,
+            "llm_error": llm_error,
+        },
+    }
+
+
+class ConfirmUploadRequest(BaseModel):
+    storage_path: str
+    storage_bucket: str = "govplatform"
+    filename: str
+    file_size: int = 0
+    mime_type: str = "application/octet-stream"
+    contract_id: Optional[str] = None
+    document_type: str = "contract"
+    is_draft: bool = True
+    is_main_document: bool = False
+    extracted_text: str = ""
+    extracted_data: Optional[dict] = None
+
+
+@router.post("/confirm")
+async def confirm_upload(
+    request: ConfirmUploadRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload),
+):
+    """
+    Confirm and permanently save a previewed document.
+    Creates the ContractAttachment DB record, updates the linked contract
+    with extracted data, and queues RAG + GraphRAG background tasks.
+    """
+    from app.models.contract import ContractAttachment, Contract
+
+    tenant_id = user_payload.get("tenant_id", "default")
+    ext = request.filename.split(".")[-1].lower() if "." in request.filename else ""
+    mime = request.mime_type
+    if "pdf" in mime:
+        file_type = "pdf"
+    elif "image" in mime:
+        file_type = "image"
+    elif "word" in mime or ext in ("doc", "docx"):
+        file_type = "word"
+    else:
+        file_type = "other"
+
+    doc_id = str(uuid.uuid4())
+    doc = ContractAttachment(
+        id=doc_id,
+        tenant_id=tenant_id,
+        contract_id=request.contract_id,
+        filename=request.filename,
+        original_filename=request.filename,
+        file_size=request.file_size,
+        file_type=file_type,
+        mime_type=request.mime_type,
+        extension=ext,
+        storage_path=request.storage_path,
+        storage_bucket=request.storage_bucket,
+        document_type=request.document_type,
+        status="ocr_completed",
+        ocr_status="completed",
+        extracted_text=request.extracted_text,
+        extracted_data=request.extracted_data or {},
+        is_draft=request.is_draft,
+        is_main_document=request.is_main_document,
+        uploaded_by=user_id,
+        uploaded_at=datetime.utcnow(),
+        is_deleted=0,
+    )
+
+    # Populate structured extraction fields for GraphRAG
+    if request.extracted_data:
+        d = request.extracted_data
+        if d.get("contract_number"):
+            doc.extracted_contract_number = d["contract_number"]
+        if d.get("contract_value"):
+            try:
+                doc.extracted_contract_value = float(d["contract_value"])
+            except (TypeError, ValueError):
+                pass
+        if d.get("start_date"):
+            try:
+                from datetime import date as _date
+                doc.extracted_start_date = _date.fromisoformat(str(d["start_date"]))
+            except (TypeError, ValueError):
+                pass
+        if d.get("end_date"):
+            try:
+                from datetime import date as _date
+                doc.extracted_end_date = _date.fromisoformat(str(d["end_date"]))
+            except (TypeError, ValueError):
+                pass
+
+    db.add(doc)
+
+    # Update linked contract with extracted data (only fill empty / auto-generated fields)
+    if request.contract_id and request.extracted_data:
+        contract = db.query(Contract).filter(Contract.id == request.contract_id).first()
+        if contract:
+            d = request.extracted_data
+            if d.get("contract_number") and (
+                not contract.contract_no or contract.contract_no.startswith("CON-")
+            ):
+                contract.contract_no = d["contract_number"]
+            if d.get("title") and (
+                not contract.title or "สัญญาใหม่" in (contract.title or "")
+            ):
+                contract.title = d["title"]
+            if d.get("counterparty") and not contract.vendor_name:
+                contract.vendor_name = d["counterparty"]
+            if d.get("contract_value"):
+                try:
+                    contract.value_original = float(d["contract_value"])
+                except (TypeError, ValueError):
+                    pass
+            if d.get("start_date"):
+                try:
+                    from datetime import date as _date
+                    contract.start_date = _date.fromisoformat(str(d["start_date"]))
+                except (TypeError, ValueError):
+                    pass
+            if d.get("end_date"):
+                try:
+                    from datetime import date as _date
+                    contract.end_date = _date.fromisoformat(str(d["end_date"]))
+                except (TypeError, ValueError):
+                    pass
+            if d.get("project_name") and not contract.project_name:
+                contract.project_name = d["project_name"]
+
+    db.commit()
+    db.refresh(doc)
+
+    # Queue background tasks
+    try:
+        from app.tasks.document import process_contract_rag_indexing, process_graphrag_extraction
+        process_contract_rag_indexing.delay(doc_id, tenant_id)
+        process_graphrag_extraction.delay(doc_id, tenant_id)
+        logger.info(f"Queued RAG + GraphRAG for document {doc_id}")
+    except Exception as e:
+        logger.warning(f"Failed to queue background tasks: {e}")
+
+    return {
+        "success": True,
+        "message": "บันทึกเอกสารสำเร็จ",
+        "data": {
+            "id": doc_id,
+            "filename": doc.filename,
+            "document_type": doc.document_type,
+            "contract_id": doc.contract_id,
+            "ocr_status": "completed",
+            "is_draft": doc.is_draft,
+            "is_main_document": doc.is_main_document,
+        },
+    }
 
 
 @router.get("/search/content")
@@ -438,20 +768,41 @@ def get_ocr_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found"
         )
-    
+
+    # Build human-readable label for the currently configured OCR engine
+    try:
+        ocr_svc = get_ocr_settings_service(doc_service.db, doc_service.user_id)
+        s = ocr_svc.get_settings()
+        mode = s.get("mode", "default")
+        if mode == "typhoon":
+            model = s.get("typhoon_model", "typhoon-ocr")
+            active_ocr_engine = f"Typhoon OCR ({model})"
+        elif mode == "custom":
+            model = s.get("custom_api_model", "")
+            active_ocr_engine = f"Custom API ({model})" if model else "Custom API"
+        else:
+            active_ocr_engine = "Tesseract / pdfplumber"
+    except Exception:
+        active_ocr_engine = "Tesseract / pdfplumber"
+
     response = {
         "document_id": document_id,
         "ocr_status": document.ocr_status,
         "ocr_confidence": document.ocr_confidence,
         "ocr_error": document.ocr_error,
+        "ocr_engine": document.ocr_engine or active_ocr_engine,
+        "active_ocr_engine": active_ocr_engine,
         "extracted_text_length": len(document.extracted_text) if document.extracted_text else 0,
         "has_extracted_data": document.extracted_data is not None
     }
-    
+
     # Include extracted_data when OCR is completed
-    if document.ocr_status == "completed" and document.extracted_data:
-        response["extracted_data"] = document.extracted_data
-    
+    if document.ocr_status == "completed":
+        if document.extracted_data:
+            response["extracted_data"] = document.extracted_data
+        if document.extracted_text:
+            response["extracted_text"] = document.extracted_text
+
     return response
 
 

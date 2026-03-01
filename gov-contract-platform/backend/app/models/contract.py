@@ -177,6 +177,7 @@ class ContractAttachment(BaseModel):
     status = Column(String(50), default='uploading')  # uploading, processing, ocr_pending, ocr_processing, ocr_completed, ocr_failed, verified, rejected
     ocr_status = Column(String(50))  # pending, processing, completed, failed
     ocr_confidence = Column(Numeric(5, 2))
+    ocr_engine = Column(String(100))  # e.g. tesseract, typhoon, custom
     ocr_error = Column(Text)
     
     # OCR Results - ข้อมูลที่ดึงออกจากเอกสาร
@@ -199,7 +200,11 @@ class ContractAttachment(BaseModel):
     verified_by = Column(String(36), ForeignKey('users.id'))
     verified_at = Column(DateTime)
     verified_data = Column(JSONB)
-    
+
+    # Document role
+    is_draft = Column(Boolean, default=True)
+    is_main_document = Column(Boolean, default=False)
+
     # Relationships
     contract = relationship("Contract", back_populates="attachments")
     vendor = relationship("Vendor", back_populates="documents")
