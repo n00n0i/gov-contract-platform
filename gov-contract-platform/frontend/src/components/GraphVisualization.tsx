@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { ZoomIn, ZoomOut, Move, RefreshCw, X, Info, Maximize2, Minimize2 } from 'lucide-react'
-import { getGraphVisualization, type GraphNode, type GraphEdge } from '../services/graphService'
+import { getGraphVisualization, getKBGraphVisualization, type GraphNode, type GraphEdge } from '../services/graphService'
 
 interface GraphVisualizationProps {
   centerEntity?: string
   depth?: number
   height?: number
+  mode?: 'contracts' | 'kb'
+  kbId?: string
 }
 
-export default function GraphVisualization({ 
-  centerEntity, 
-  depth = 2, 
-  height = 500 
+export default function GraphVisualization({
+  centerEntity,
+  depth = 2,
+  height = 500,
+  mode = 'contracts',
+  kbId,
 }: GraphVisualizationProps) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [nodes, setNodes] = useState<GraphNode[]>([])
@@ -29,40 +33,59 @@ export default function GraphVisualization({
 
   // Color scheme for entity types (Thai labels)
   const typeColors: Record<string, string> = {
-    person: '#3b82f6',      // Blue - บุคคล
-    org: '#10b981',         // Green - องค์กร
-    contract: '#f59e0b',    // Amber - สัญญา
-    project: '#8b5cf6',     // Purple - โครงการ
-    money: '#ef4444',       // Red - มูลค่า/เงิน
-    date: '#6b7280',        // Gray - วันที่
-    term: '#14b8a6',        // Teal - เงื่อนไข
-    clause: '#f97316',      // Orange - มาตรา
-    service: '#84cc16',     // Lime - งาน/บริการ
-    asset: '#06b6d4',       // Cyan - ทรัพย์สิน
-    location: '#a855f7',    // Violet - สถานที่
-    document: '#6366f1',    // Indigo - เอกสาร
+    person: '#3b82f6',           // Blue - บุคคล
+    party: '#3b82f6',            // Blue - คู่สัญญา (same as person)
+    counterparty: '#3b82f6',     // Blue - คู่สัญญา (same as person)
+    org: '#10b981',              // Green - องค์กร
+    contract: '#f59e0b',         // Amber - สัญญา
+    contract_number: '#f59e0b',  // Amber - เลขที่สัญญา
+    project: '#8b5cf6',          // Purple - โครงการ
+    money: '#ef4444',            // Red - มูลค่า/เงิน
+    date: '#6b7280',             // Gray - วันที่
+    start_date: '#6b7280',       // Gray - วันที่เริ่ม
+    end_date: '#6b7280',         // Gray - วันที่สิ้นสุด
+    term: '#14b8a6',             // Teal - เงื่อนไข
+    clause: '#f97316',           // Orange - มาตรา
+    service: '#84cc16',          // Lime - งาน/บริการ
+    asset: '#06b6d4',            // Cyan - ทรัพย์สิน
+    location: '#a855f7',         // Violet - สถานที่
+    document: '#6366f1',         // Indigo - เอกสาร
+    unknown: '#9ca3af',          // Light gray - ไม่ระบุ
   }
 
   const typeLabels: Record<string, string> = {
     person: 'บุคคล',
+    party: 'คู่สัญญา',
+    counterparty: 'คู่สัญญา',
     org: 'องค์กร',
     contract: 'สัญญา',
+    contract_number: 'เลขที่สัญญา',
     project: 'โครงการ',
     money: 'มูลค่า/เงิน',
     date: 'วันที่',
+    start_date: 'วันที่เริ่ม',
+    end_date: 'วันที่สิ้นสุด',
     term: 'เงื่อนไข',
     clause: 'มาตรา',
     service: 'งาน/บริการ',
     asset: 'ทรัพย์สิน',
     location: 'สถานที่',
     document: 'เอกสาร',
+    unknown: 'ไม่ระบุ',
   }
+
+  // Deduplicated legend: one entry per unique color
+  const legendEntries = Object.entries(typeColors).filter(
+    ([type, color], idx, arr) => arr.findIndex(([, c]) => c === color) === idx
+  ).map(([type, color]) => ({ color, label: typeLabels[type] || type }))
 
   const fetchGraphData = async () => {
     try {
       setLoading(true)
       setError(null)
-      const data = await getGraphVisualization(centerEntity, depth, 100)
+      const data = mode === 'kb'
+        ? await getKBGraphVisualization(kbId, centerEntity, depth, 100)
+        : await getGraphVisualization(centerEntity, depth, 100)
       
       // Assign positions if not present (simple force-like layout)
       const positionedNodes = data.nodes.map((node, i) => {
@@ -96,7 +119,7 @@ export default function GraphVisualization({
 
   useEffect(() => {
     fetchGraphData()
-  }, [centerEntity, depth])
+  }, [centerEntity, depth, mode, kbId])
 
   // Canvas pan handlers
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
@@ -253,13 +276,13 @@ export default function GraphVisualization({
       <div className="absolute top-4 right-4 z-10 bg-white rounded-lg shadow p-3 max-w-xs">
         <h4 className="text-sm font-medium text-gray-700 mb-2">ประเภท Entity</h4>
         <div className="space-y-1 max-h-40 overflow-y-auto">
-          {Object.entries(typeColors).map(([type, color]) => (
-            <div key={type} className="flex items-center gap-2 text-xs">
-              <div 
-                className="w-3 h-3 rounded-full" 
+          {legendEntries.map(({ color, label }) => (
+            <div key={color} className="flex items-center gap-2 text-xs">
+              <div
+                className="w-3 h-3 rounded-full flex-shrink-0"
                 style={{ backgroundColor: color }}
               />
-              <span className="text-gray-600">{typeLabels[type] || type}</span>
+              <span className="text-gray-600">{label}</span>
             </div>
           ))}
         </div>

@@ -124,20 +124,73 @@ async def upload_document(
         )
 
 
-DEFAULT_EXTRACTION_PROMPT = (
-    "สกัดข้อมูลสัญญาจากข้อความ OCR ต่อไปนี้ ตอบในรูปแบบ JSON เท่านั้น ห้ามมีข้อความอื่น:\n"
-    "{\n"
-    '  "contract_number": "เลขที่สัญญา (ถ้าไม่พบ ให้ใส่ null)",\n'
-    '  "title": "ชื่อโครงการ/สัญญา",\n'
-    '  "counterparty": "ชื่อผู้รับจ้าง/คู่สัญญา",\n'
-    '  "contract_type": "service|construction|procurement|consulting|other",\n'
-    '  "contract_value": 0.0,\n'
-    '  "project_name": "ชื่อโครงการ",\n'
-    '  "start_date": "YYYY-MM-DD หรือ null",\n'
-    '  "end_date": "YYYY-MM-DD หรือ null"\n'
-    "}\n\n"
-    "ข้อความ OCR:\n"
+DEFAULT_EXTRACTION_PROMPT = """\
+You are a contract data extraction API. Extract structured data from the Thai government contract text below.
+
+RULES:
+- Respond with ONLY a single valid JSON object — no markdown, no explanation, no ```json fences.
+- If a field cannot be found, use null (not empty string).
+- contract_value must be a number (float), not a string. If not found use null.
+- Dates must be YYYY-MM-DD format. Convert Thai Buddhist Era (BE) to CE by subtracting 543.
+- contract_type must be one of: "procurement" | "construction" | "service" | "consulting" | "other"
+
+OUTPUT FORMAT (copy exactly, fill values):
+{"contract_number":null,"title":null,"counterparty":null,"contract_type":null,"contract_value":null,"project_name":null,"start_date":null,"end_date":null,"summary":null}
+
+CONTRACT TEXT:
+"""
+
+SYSTEM_PROMPT = (
+    "You are a JSON-only contract data extraction API for Thai government contracts. "
+    "Always respond with a single valid JSON object and nothing else. No markdown. No explanation."
 )
+
+
+def _parse_llm_json(text: str) -> dict:
+    """Try multiple strategies to extract a JSON object from LLM response text."""
+    import re, json
+
+    text = text.strip()
+
+    # Strategy 1: full text is JSON
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # Strategy 2: strip markdown fences
+    stripped = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
+    try:
+        return json.loads(stripped)
+    except Exception:
+        pass
+
+    # Strategy 3: find the LAST {...} block (greedy, handles preamble text)
+    matches = list(re.finditer(r"\{[^{}]*\}", stripped, re.DOTALL))
+    if not matches:
+        matches = list(re.finditer(r"\{.*?\}", stripped, re.DOTALL))
+    for m in reversed(matches):
+        try:
+            return json.loads(m.group())
+        except Exception:
+            pass
+
+    # Strategy 4: extract key:value pairs manually as fallback
+    fields = ["contract_number", "title", "counterparty", "contract_type",
+              "contract_value", "project_name", "start_date", "end_date", "summary"]
+    result: dict = {}
+    for field in fields:
+        pattern = rf'"{field}"\s*:\s*("(?:[^"\\]|\\.)*"|null|-?\d+(?:\.\d+)?)'
+        m2 = re.search(pattern, text)
+        if m2:
+            try:
+                result[field] = json.loads(m2.group(1))
+            except Exception:
+                result[field] = m2.group(1).strip('"')
+    if result:
+        return result
+
+    return {}
 
 
 async def _llm_extract_for_document(
@@ -170,10 +223,12 @@ async def _llm_extract_for_document(
             AIProvider.is_active == True,
         ).first()
     if not provider:
+        logger.warning("_llm_extract: no AI provider found for user")
         return {}
 
     prompt_text = custom_prompt if custom_prompt else DEFAULT_EXTRACTION_PROMPT
-    full_prompt = f"{prompt_text}\n{ocr_text[:4000]}"
+    ocr_snippet = ocr_text[:5000]        # allow slightly more text per window
+    user_message = f"{prompt_text}\n{ocr_snippet}"
 
     base_url = (provider.api_url or "").rstrip("/")
     if base_url.endswith("/v1"):
@@ -182,34 +237,62 @@ async def _llm_extract_for_document(
     if provider.api_key:
         headers["Authorization"] = f"Bearer {provider.api_key}"
     model = getattr(provider, "model", None) or getattr(provider, "model_name", None) or ""
-    provider_type = getattr(provider, "provider_type", "") or ""
+    provider_type = (getattr(provider, "provider_type", "") or "").lower()
 
+    raw_text = ""
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             if "ollama" in provider_type or "ollama" in base_url:
+                # Ollama: combine system + user into one prompt
+                combined = f"{SYSTEM_PROMPT}\n\n{user_message}"
                 r = await client.post(
                     f"{base_url}/api/generate",
-                    json={"model": model, "prompt": full_prompt, "stream": False},
+                    json={"model": model, "prompt": combined, "stream": False},
                     headers=headers,
                 )
-                text = r.json().get("response", "")
+                r.raise_for_status()
+                raw_text = r.json().get("response", "")
             else:
+                # OpenAI-compatible: use system message
                 r = await client.post(
                     f"{base_url}/v1/chat/completions",
                     json={
                         "model": model or "gpt-3.5-turbo",
-                        "messages": [{"role": "user", "content": full_prompt}],
-                        "temperature": 0.1,
+                        "messages": [
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user",   "content": user_message},
+                        ],
+                        "temperature": 0.0,   # deterministic
+                        "response_format": {"type": "json_object"},   # if supported
                     },
                     headers=headers,
                 )
-                text = r.json()["choices"][0]["message"]["content"]
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if m:
-            return json.loads(m.group())
+                # response_format may not be supported — fall back gracefully
+                if r.status_code == 400:
+                    r = await client.post(
+                        f"{base_url}/v1/chat/completions",
+                        json={
+                            "model": model or "gpt-3.5-turbo",
+                            "messages": [
+                                {"role": "system", "content": SYSTEM_PROMPT},
+                                {"role": "user",   "content": user_message},
+                            ],
+                            "temperature": 0.0,
+                        },
+                        headers=headers,
+                    )
+                r.raise_for_status()
+                raw_text = r.json()["choices"][0]["message"]["content"]
+
+        logger.debug(f"LLM raw response (first 300): {raw_text[:300]}")
+        result = _parse_llm_json(raw_text)
+        if not result:
+            logger.warning(f"LLM extraction produced no parseable JSON. raw={raw_text[:200]}")
+        return result
+
     except Exception as e:
-        logger.warning(f"LLM extraction failed in preview: {e}")
-    return {}
+        logger.warning(f"LLM extraction failed: {e}")
+        return {}
 
 
 @router.post("/ocr-preview")
@@ -426,6 +509,555 @@ async def confirm_upload(
         process_contract_rag_indexing.delay(doc_id, tenant_id)
         process_graphrag_extraction.delay(doc_id, tenant_id)
         logger.info(f"Queued RAG + GraphRAG for document {doc_id}")
+    except Exception as e:
+        logger.warning(f"Failed to queue background tasks: {e}")
+
+    return {
+        "success": True,
+        "message": "บันทึกเอกสารสำเร็จ",
+        "data": {
+            "id": doc_id,
+            "filename": doc.filename,
+            "document_type": doc.document_type,
+            "contract_id": doc.contract_id,
+            "ocr_status": "completed",
+            "is_draft": doc.is_draft,
+            "is_main_document": doc.is_main_document,
+        },
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ASYNC JOB ENDPOINTS
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/jobs")
+async def create_document_job(
+    file: UploadFile = File(...),
+    contract_id: Optional[str] = Form(None),
+    document_type: str = Form("contract"),
+    is_draft: bool = Form(True),
+    is_main_document: bool = Form(False),
+    llm_provider_id: Optional[str] = Form(None),
+    extraction_prompt: Optional[str] = Form(None),
+    user_id: str = Depends(get_current_user_id),
+    user_payload: dict = Depends(get_current_user_payload),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload a file and create a background processing job.
+    Returns immediately with job_id. Poll GET /documents/jobs/{job_id} for status.
+    """
+    from app.models.document_job import DocumentProcessingJob
+    from app.services.storage.minio_service import get_storage_service
+    from app.tasks.document import process_document_upload_job
+
+    content = await file.read()
+    tenant_id = user_payload.get("tenant_id", "default")
+
+    storage = get_storage_service()
+    job_id = str(uuid.uuid4())
+    upload_result = storage.upload_file(
+        file_data=io.BytesIO(content),
+        filename=file.filename,
+        content_type=file.content_type or "application/octet-stream",
+        folder=f"tenant_{tenant_id}/documents/jobs",
+        metadata={"job_id": job_id, "uploaded_by": user_id},
+    )
+
+    job = DocumentProcessingJob(
+        id=job_id,
+        user_id=user_id,
+        contract_id=contract_id or None,
+        filename=file.filename,
+        storage_path=upload_result["storage_path"],
+        storage_bucket=upload_result.get("storage_bucket", "govplatform"),
+        mime_type=file.content_type or "application/octet-stream",
+        file_size=len(content),
+        document_type=document_type,
+        is_draft=is_draft,
+        is_main_document=is_main_document,
+        llm_provider_id=llm_provider_id or None,
+        extraction_prompt=extraction_prompt or None,
+        status="pending",
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    task = process_document_upload_job.delay(job_id)
+    job.celery_task_id = task.id
+    db.commit()
+
+    return {
+        "success": True,
+        "data": {
+            "job_id": job_id,
+            "status": "pending",
+            "filename": file.filename,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+        },
+    }
+
+
+@router.get("/jobs/stats")
+def get_document_job_stats(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Return job counts by status for the current user (used in dashboard)."""
+    from app.models.document_job import DocumentProcessingJob
+    from sqlalchemy import func
+
+    rows = (
+        db.query(DocumentProcessingJob.status, func.count(DocumentProcessingJob.id))
+        .filter(DocumentProcessingJob.user_id == user_id)
+        .group_by(DocumentProcessingJob.status)
+        .all()
+    )
+    counts = {r[0]: r[1] for r in rows}
+    return {
+        "success": True,
+        "data": {
+            "pending": counts.get("pending", 0),
+            "processing": counts.get("processing", 0),
+            "completed": counts.get("completed", 0),
+            "failed": counts.get("failed", 0),
+            "total": sum(counts.values()),
+        },
+    }
+
+
+@router.get("/jobs")
+def list_document_jobs(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    limit: int = 100,
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    """Return jobs for the current user with optional filters."""
+    from app.models.document_job import DocumentProcessingJob
+    from app.models.contract import Contract
+
+    q = (
+        db.query(DocumentProcessingJob)
+        .filter(DocumentProcessingJob.user_id == user_id)
+    )
+    if status:
+        q = q.filter(DocumentProcessingJob.status == status)
+    if date_from:
+        try:
+            from datetime import datetime as _dt
+            q = q.filter(DocumentProcessingJob.created_at >= _dt.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            from datetime import datetime as _dt
+            q = q.filter(DocumentProcessingJob.created_at <= _dt.fromisoformat(date_to))
+        except ValueError:
+            pass
+
+    jobs = q.order_by(DocumentProcessingJob.created_at.desc()).limit(limit).all()
+
+    result = []
+    for j in jobs:
+        contract_title = None
+        if j.contract_id:
+            c = db.query(Contract).filter(Contract.id == j.contract_id).first()
+            if c:
+                contract_title = c.title
+
+        result.append({
+            "id": j.id,
+            "filename": j.filename,
+            "status": j.status,
+            "contract_id": j.contract_id,
+            "contract_title": contract_title,
+            "document_type": j.document_type,
+            "is_draft": j.is_draft,
+            "is_main_document": j.is_main_document,
+            "page_count": j.page_count,
+            "ocr_engine": j.ocr_engine,
+            "ocr_error": j.ocr_error,
+            "llm_error": j.llm_error,
+            "has_ocr_text": bool(j.extracted_text),   # lightweight flag for frontend
+            "extracted_text": j.extracted_text,        # full text for modal pre-fill
+            "extracted_data": j.extracted_data,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+        })
+
+    return {"success": True, "data": result, "total": len(result)}
+
+
+@router.get("/jobs/{job_id}")
+def get_document_job(
+    job_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Get full job details including extracted_data (for polling)."""
+    from app.models.document_job import DocumentProcessingJob
+    from app.models.contract import Contract
+    from fastapi import HTTPException
+
+    job = db.query(DocumentProcessingJob).filter(DocumentProcessingJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    contract_title = None
+    if job.contract_id:
+        c = db.query(Contract).filter(Contract.id == job.contract_id).first()
+        if c:
+            contract_title = c.title
+
+    return {
+        "success": True,
+        "data": {
+            "id": job.id,
+            "filename": job.filename,
+            "status": job.status,
+            "contract_id": job.contract_id,
+            "contract_title": contract_title,
+            "document_type": job.document_type,
+            "is_draft": job.is_draft,
+            "is_main_document": job.is_main_document,
+            "page_count": job.page_count,
+            "ocr_engine": job.ocr_engine,
+            "ocr_error": job.ocr_error,
+            "llm_error": job.llm_error,
+            "extracted_text": job.extracted_text,
+            "extracted_data": job.extracted_data,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        },
+    }
+
+
+@router.post("/jobs/{job_id}/rerun")
+def rerun_document_job(
+    job_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Requeue a failed job. Only allowed when status=failed."""
+    from app.models.document_job import DocumentProcessingJob
+    from app.tasks.document import process_document_upload_job
+    from fastapi import HTTPException
+
+    job = db.query(DocumentProcessingJob).filter(DocumentProcessingJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if job.status != "failed":
+        raise HTTPException(status_code=400, detail=f"Job is not failed (status={job.status})")
+
+    job.status = "pending"
+    job.ocr_error = None
+    job.llm_error = None
+    job.completed_at = None
+    db.commit()
+
+    task = process_document_upload_job.delay(job_id)
+    job.celery_task_id = task.id
+    db.commit()
+
+    return {"success": True, "data": {"job_id": job_id, "status": "pending"}}
+
+
+@router.get("/jobs/{job_id}/raw-text")
+def get_job_raw_text(
+    job_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Return the stored OCR extracted_text for a job."""
+    from app.models.document_job import DocumentProcessingJob
+    from fastapi import HTTPException
+
+    job = db.query(DocumentProcessingJob).filter(DocumentProcessingJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    return {
+        "success": True,
+        "data": {
+            "job_id": job_id,
+            "extracted_text": job.extracted_text or "",
+            "char_count": len(job.extracted_text or ""),
+            "ocr_engine": job.ocr_engine,
+        },
+    }
+
+
+class ReExtractRequest(BaseModel):
+    custom_prompt: Optional[str] = None
+    llm_provider_id: Optional[str] = None
+
+
+@router.post("/jobs/{job_id}/re-extract")
+async def re_extract_job(
+    job_id: str,
+    request: ReExtractRequest = ReExtractRequest(),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Re-run LLM extraction using SLIDING WINDOW on stored OCR text.
+    Splits text into pages, processes pairs (p1+p2, p2+p3, ...) and merges results.
+    Does NOT rerun OCR.
+    """
+    from app.models.document_job import DocumentProcessingJob
+    from fastapi import HTTPException
+
+    job = db.query(DocumentProcessingJob).filter(DocumentProcessingJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not job.extracted_text:
+        raise HTTPException(status_code=400, detail="ไม่มีข้อความ OCR ที่เก็บไว้ กรุณา rerun OCR ก่อน")
+
+    text = job.extracted_text
+
+    # ── Split into pages ──────────────────────────────────────
+    # Try form-feed character first (PDF page break), then ~800-char chunks
+    if '\f' in text:
+        raw_pages = [p for p in text.split('\f') if p.strip()]
+    else:
+        chunk_size = 800
+        raw_pages = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+    # Deduplicate tiny trailing chunks
+    pages = [p for p in raw_pages if len(p.strip()) > 30] or [text]
+
+    logger.info(f"re-extract sliding window: job={job_id}, pages={len(pages)}")
+
+    # ── Sliding window: pairs (0-1), (1-2), (2-3) … ─────────
+    merged: dict = {}
+    for i in range(max(1, len(pages))):
+        # Window = page i-1 + page i  (first window is just page 0)
+        if i == 0:
+            chunk = pages[0]
+        else:
+            chunk = pages[i - 1] + "\n" + pages[i]
+
+        try:
+            result = await _llm_extract_for_document(
+                db=db,
+                user_id=user_id,
+                llm_provider_id=request.llm_provider_id,
+                ocr_text=chunk[:4000],     # guard: _llm already truncates but be explicit
+                custom_prompt=request.custom_prompt,
+            )
+            # Merge: later windows fill in any field still empty
+            for k, v in result.items():
+                if v and not merged.get(k):
+                    merged[k] = v
+            logger.info(f"  window {i}: extracted {list(result.keys())}")
+        except Exception as win_err:
+            logger.warning(f"  window {i} failed: {win_err}")
+            continue  # skip bad windows, keep going
+
+    try:
+        job.extracted_data = merged
+        job.llm_error = None
+        db.commit()
+    except Exception as db_err:
+        logger.error(f"re-extract DB commit failed: {db_err}")
+
+    return {
+        "success": True,
+        "data": {
+            "extracted_data": merged,
+            "windows_processed": len(pages),
+            "fields_extracted": list(merged.keys()),
+        },
+    }
+
+
+
+@router.delete("/jobs/{job_id}")
+def delete_document_job(
+    job_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete a job record. Not allowed while status=processing.
+    Does NOT delete the file from MinIO (it may still be needed).
+    """
+    from app.models.document_job import DocumentProcessingJob
+    from fastapi import HTTPException
+
+    job = db.query(DocumentProcessingJob).filter(DocumentProcessingJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if job.status == "processing":
+        raise HTTPException(
+            status_code=400,
+            detail="ไม่สามารถลบงานที่กำลังประมวลผลอยู่ได้"
+        )
+
+    db.delete(job)
+    db.commit()
+
+    return {"success": True, "message": "ลบงานสำเร็จ", "data": {"job_id": job_id}}
+
+
+class JobConfirmRequest(BaseModel):
+    extracted_data: Optional[dict] = None
+    contract_id: Optional[str] = None
+    document_type: str = "contract"
+    is_draft: bool = True
+    is_main_document: bool = False
+
+
+@router.post("/jobs/{job_id}/confirm")
+async def confirm_document_job(
+    job_id: str,
+    request: JobConfirmRequest,
+    user_id: str = Depends(get_current_user_id),
+    user_payload: dict = Depends(get_current_user_payload),
+    db: Session = Depends(get_db),
+):
+    """
+    Confirm a completed job: creates ContractAttachment, updates contract,
+    queues RAG + GraphRAG.
+    """
+    from app.models.document_job import DocumentProcessingJob
+    from app.models.contract import ContractAttachment, Contract
+    from fastapi import HTTPException
+
+    job = db.query(DocumentProcessingJob).filter(DocumentProcessingJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if job.status != "completed":
+        raise HTTPException(status_code=400, detail=f"Job is not completed (status={job.status})")
+
+    tenant_id = user_payload.get("tenant_id", "default")
+    filename = job.filename
+    mime = job.mime_type or "application/octet-stream"
+    ext = filename.split(".")[-1].lower() if "." in filename else ""
+
+    if "pdf" in mime:
+        file_type = "pdf"
+    elif "image" in mime:
+        file_type = "image"
+    elif "word" in mime or ext in ("doc", "docx"):
+        file_type = "word"
+    else:
+        file_type = "other"
+
+    extracted_data = request.extracted_data or job.extracted_data or {}
+    contract_id = request.contract_id or job.contract_id
+
+    doc_id = str(uuid.uuid4())
+    doc = ContractAttachment(
+        id=doc_id,
+        tenant_id=tenant_id,
+        contract_id=contract_id,
+        filename=filename,
+        original_filename=filename,
+        file_size=job.file_size or 0,
+        file_type=file_type,
+        mime_type=mime,
+        extension=ext,
+        storage_path=job.storage_path,
+        storage_bucket=job.storage_bucket,
+        document_type=request.document_type,
+        status="ocr_completed",
+        ocr_status="completed",
+        extracted_text=job.extracted_text or "",
+        extracted_data=extracted_data,
+        is_draft=request.is_draft,
+        is_main_document=request.is_main_document,
+        uploaded_by=user_id,
+        uploaded_at=datetime.utcnow(),
+        is_deleted=0,
+    )
+
+    # Populate structured extraction fields for GraphRAG
+    if extracted_data:
+        d = extracted_data
+        if d.get("contract_number"):
+            doc.extracted_contract_number = d["contract_number"]
+        if d.get("contract_value"):
+            try:
+                doc.extracted_contract_value = float(d["contract_value"])
+            except (TypeError, ValueError):
+                pass
+        if d.get("start_date"):
+            try:
+                from datetime import date as _date
+                doc.extracted_start_date = _date.fromisoformat(str(d["start_date"]))
+            except (TypeError, ValueError):
+                pass
+        if d.get("end_date"):
+            try:
+                from datetime import date as _date
+                doc.extracted_end_date = _date.fromisoformat(str(d["end_date"]))
+            except (TypeError, ValueError):
+                pass
+
+    db.add(doc)
+
+    # Update linked contract with extracted data
+    if contract_id and extracted_data:
+        contract = db.query(Contract).filter(Contract.id == contract_id).first()
+        if contract:
+            d = extracted_data
+            if d.get("contract_number") and (
+                not contract.contract_no or contract.contract_no.startswith("CON-")
+            ):
+                contract.contract_no = d["contract_number"]
+            if d.get("title") and (
+                not contract.title or "สัญญาใหม่" in (contract.title or "")
+            ):
+                contract.title = d["title"]
+            if d.get("counterparty") and not contract.vendor_name:
+                contract.vendor_name = d["counterparty"]
+            if d.get("contract_value"):
+                try:
+                    contract.value_original = float(d["contract_value"])
+                except (TypeError, ValueError):
+                    pass
+            if d.get("start_date"):
+                try:
+                    from datetime import date as _date
+                    contract.start_date = _date.fromisoformat(str(d["start_date"]))
+                except (TypeError, ValueError):
+                    pass
+            if d.get("end_date"):
+                try:
+                    from datetime import date as _date
+                    contract.end_date = _date.fromisoformat(str(d["end_date"]))
+                except (TypeError, ValueError):
+                    pass
+            if d.get("project_name") and not contract.project_name:
+                contract.project_name = d["project_name"]
+
+    db.commit()
+    db.refresh(doc)
+
+    # Queue background tasks
+    try:
+        from app.tasks.document import process_contract_rag_indexing, process_graphrag_extraction
+        process_contract_rag_indexing.delay(doc_id, tenant_id)
+        process_graphrag_extraction.delay(doc_id, tenant_id)
+        logger.info(f"Queued RAG + GraphRAG for document {doc_id} from job {job_id}")
     except Exception as e:
         logger.warning(f"Failed to queue background tasks: {e}")
 
@@ -742,18 +1374,50 @@ def update_document_extracted_data(
 
 
 @router.delete("/{document_id}")
-def delete_document(
+async def delete_document(
     document_id: str,
-    doc_service: DocumentService = Depends(get_doc_service)
+    doc_service: DocumentService = Depends(get_doc_service),
+    db: Session = Depends(get_db),
 ):
-    """Delete document (soft delete)"""
+    """Delete document — removes from DB, RAG vector store, and MinIO storage."""
+    from app.services.ai.rag_service import RAGService
+
+    # 1. Fetch document before deleting (need storage_path)
+    document = doc_service.get_document(document_id)
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+
+    storage_path = getattr(document, "storage_path", None)
+
+    # 2. Remove from RAG vector store (all KBs)
+    try:
+        rag = RAGService(db)
+        removed = await rag.remove_document(document_id)
+        logger.info(f"RAG cleanup for doc {document_id}: removed={removed}")
+    except Exception as rag_err:
+        logger.warning(f"RAG cleanup failed for doc {document_id}: {rag_err}")
+
+    # 3. Delete from MinIO (best-effort, non-blocking)
+    if storage_path:
+        try:
+            from app.services.storage.minio_service import get_storage_service
+            storage = get_storage_service()
+            storage.delete_file(storage_path)
+            logger.info(f"MinIO file deleted: {storage_path}")
+        except Exception as minio_err:
+            logger.warning(f"MinIO delete failed for {storage_path}: {minio_err}")
+
+    # 4. Delete from DB
     success = doc_service.delete_document(document_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found"
         )
-    return {"success": True, "message": "Document deleted"}
+    return {"success": True, "message": "Document deleted (DB + RAG + storage)"}
 
 
 @router.get("/{document_id}/ocr-status")

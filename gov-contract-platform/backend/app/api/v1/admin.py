@@ -784,3 +784,220 @@ async def clear_all_contracts(
         logger.error(f"clear_all_contracts failed: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"ล้างข้อมูลไม่สำเร็จ: {e}")
+
+
+# ── DANGER ZONE: ล้าง DB + KB + GraphRAG + รีเซ็ต Jobs → ready to rebuild ──────
+
+@router.post("/contracts/reset-for-rebuild")
+async def reset_for_rebuild(
+    confirm: bool = Query(False),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload),
+):
+    """
+    Danger Zone — Reset for Rebuild (ไม่ลบไฟล์ MinIO):
+    • Hard-delete contracts from DB (contracts + child tables)
+    • Clear system contracts KB (vector_chunks)
+    • Clear GraphRAG (Neo4j)
+    • Reset ALL document processing jobs → status=pending (ready to rebuild)
+    Files in MinIO are preserved so jobs can be reprocessed.
+    """
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Set confirm=true to execute")
+
+    user_id = user_payload.get("sub")
+    stats = {
+        "deleted_contracts": 0,
+        "deleted_vector_chunks": 0,
+        "deleted_graph_entities": 0,
+        "deleted_graph_relationships": 0,
+        "jobs_reset_to_pending": 0,
+        "errors": [],
+    }
+
+    try:
+        from app.models.contract import Contract, ContractAttachment
+        from app.models.document_job import DocumentProcessingJob
+        from sqlalchemy import text
+
+        # 1. Hard-delete all contracts (keep MinIO files)
+        stats["deleted_contracts"] = db.query(Contract).count()
+        child_tables = [
+            "contract_audit_logs", "contract_changes",
+            "contract_payments", "contract_milestones", "contract_attachments",
+        ]
+        for table in child_tables:
+            try:
+                db.execute(text(f"DELETE FROM {table}"))
+            except Exception as e:
+                logger.warning(f"Could not delete from {table}: {e}")
+        db.execute(text("DELETE FROM contracts"))
+        db.commit()
+
+        # 2. Clear system contracts KB vector chunks
+        try:
+            result = db.execute(
+                text("DELETE FROM vector_chunks WHERE kb_id = :kb_id"),
+                {"kb_id": "system-contracts-kb"},
+            )
+            stats["deleted_vector_chunks"] = result.rowcount
+            db.commit()
+        except Exception as e:
+            stats["errors"].append(f"vector_chunks: {e}")
+
+        # 3. Clear Neo4j GraphRAG
+        try:
+            from app.services.graph import get_contracts_graph_service
+            graph_service = get_contracts_graph_service()
+            g = graph_service.clear_all_data()
+            stats["deleted_graph_entities"] = g.get("deleted_entities", 0)
+            stats["deleted_graph_relationships"] = g.get("deleted_relationships", 0)
+        except Exception as e:
+            stats["errors"].append(f"GraphRAG: {e}")
+
+        # 4. Reset ALL jobs → pending (so they can be reprocessed from MinIO)
+        try:
+            result = db.execute(
+                text("""
+                    UPDATE document_processing_jobs
+                    SET status = 'pending',
+                        ocr_error = NULL,
+                        llm_error = NULL,
+                        completed_at = NULL,
+                        extracted_text = NULL,
+                        extracted_data = NULL
+                """)
+            )
+            stats["jobs_reset_to_pending"] = result.rowcount
+            db.commit()
+        except Exception as e:
+            stats["errors"].append(f"jobs reset: {e}")
+
+        logger.warning(
+            f"[reset_for_rebuild] by {user_id}: "
+            f"{stats['deleted_contracts']} contracts deleted, "
+            f"{stats['jobs_reset_to_pending']} jobs reset to pending"
+        )
+
+        return {"success": True, "message": "รีเซ็ตสำเร็จ - jobs พร้อม rebuild", **stats}
+
+    except Exception as e:
+        logger.error(f"reset_for_rebuild failed: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"รีเซ็ตไม่สำเร็จ: {e}")
+
+
+# ── DANGER ZONE: Nuclear — ลบทุกอย่าง รวม MinIO + Jobs ─────────────────────────
+
+@router.post("/contracts/nuke-all")
+async def nuke_all(
+    confirm: bool = Query(False),
+    db: Session = Depends(get_db),
+    user_payload: dict = Depends(get_current_user_payload),
+):
+    """
+    Danger Zone — Nuclear Option: ลบทุกอย่างรวม MinIO + Jobs
+    • Hard-delete contracts from DB
+    • Clear system contracts KB (vector_chunks)
+    • Clear GraphRAG (Neo4j)
+    • Delete ALL document processing jobs
+    • Delete ALL files from MinIO
+    ⛔ ไม่สามารถกู้คืนได้ทุกอย่าง
+    """
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Set confirm=true to execute")
+
+    user_id = user_payload.get("sub")
+    storage = get_storage_service()
+    stats = {
+        "deleted_contracts": 0,
+        "deleted_minio_files": 0,
+        "failed_minio_files": 0,
+        "deleted_vector_chunks": 0,
+        "deleted_graph_entities": 0,
+        "deleted_graph_relationships": 0,
+        "deleted_jobs": 0,
+        "errors": [],
+    }
+
+    try:
+        from app.models.contract import Contract, ContractAttachment
+        from app.models.document_job import DocumentProcessingJob
+        from sqlalchemy import text
+
+        # 1. Collect all MinIO paths (contracts + jobs) BEFORE deleting
+        attachments = db.query(ContractAttachment).all()
+        job_paths = db.query(DocumentProcessingJob).with_entities(
+            DocumentProcessingJob.storage_path
+        ).all()
+        all_paths = (
+            [a.storage_path for a in attachments if a.storage_path] +
+            [j[0] for j in job_paths if j[0]]
+        )
+
+        # 2. Delete all files from MinIO
+        for path in all_paths:
+            try:
+                storage.delete_file(path)
+                stats["deleted_minio_files"] += 1
+            except Exception as e:
+                stats["failed_minio_files"] += 1
+                stats["errors"].append(f"MinIO {path}: {e}")
+
+        # 3. Hard-delete contracts
+        stats["deleted_contracts"] = db.query(Contract).count()
+        child_tables = [
+            "contract_audit_logs", "contract_changes",
+            "contract_payments", "contract_milestones", "contract_attachments",
+        ]
+        for table in child_tables:
+            try:
+                db.execute(text(f"DELETE FROM {table}"))
+            except Exception as e:
+                logger.warning(f"Could not delete {table}: {e}")
+        db.execute(text("DELETE FROM contracts"))
+        db.commit()
+
+        # 4. Delete all document processing jobs
+        try:
+            result = db.execute(text("DELETE FROM document_processing_jobs"))
+            stats["deleted_jobs"] = result.rowcount
+            db.commit()
+        except Exception as e:
+            stats["errors"].append(f"jobs: {e}")
+
+        # 5. Clear system contracts KB vector chunks
+        try:
+            result = db.execute(
+                text("DELETE FROM vector_chunks WHERE kb_id = :kb_id"),
+                {"kb_id": "system-contracts-kb"},
+            )
+            stats["deleted_vector_chunks"] = result.rowcount
+            db.commit()
+        except Exception as e:
+            stats["errors"].append(f"vector_chunks: {e}")
+
+        # 6. Clear Neo4j GraphRAG
+        try:
+            from app.services.graph import get_contracts_graph_service
+            graph_service = get_contracts_graph_service()
+            g = graph_service.clear_all_data()
+            stats["deleted_graph_entities"] = g.get("deleted_entities", 0)
+            stats["deleted_graph_relationships"] = g.get("deleted_relationships", 0)
+        except Exception as e:
+            stats["errors"].append(f"GraphRAG: {e}")
+
+        logger.warning(
+            f"[nuke_all] by {user_id}: "
+            f"{stats['deleted_contracts']} contracts, "
+            f"{stats['deleted_minio_files']} MinIO files, "
+            f"{stats['deleted_jobs']} jobs DELETED"
+        )
+
+        return {"success": True, "message": "ลบข้อมูลทั้งหมดสำเร็จ", **stats}
+
+    except Exception as e:
+        logger.error(f"nuke_all failed: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"ลบไม่สำเร็จ: {e}")
+

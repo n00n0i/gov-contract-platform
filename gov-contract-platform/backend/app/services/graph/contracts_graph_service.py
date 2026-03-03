@@ -131,15 +131,15 @@ class ContractsGraphService(BaseGraphService):
                     }
                 else:
                     query = f"""
-                    CALL db.index.fulltext.queryNodes('{self.domain.value}_entity_name_fulltext', $name)
-                    YIELD node as e, score
-                    WHERE {security_where}
+                    MATCH (e:Entity:{domain_label})
+                    WHERE toLower(e.name) CONTAINS toLower($name)
+                      AND {security_where}
                     RETURN e
-                    ORDER BY score DESC
+                    ORDER BY e.confidence DESC
                     LIMIT $limit
                     """
                     params = {
-                        "name": f"*{name}*",
+                        "name": name,
                         "limit": limit,
                         **security_params
                     }

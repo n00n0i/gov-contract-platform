@@ -96,6 +96,78 @@ def _ascii_keywords(keywords: List[str]) -> List[str]:
     return [k for k in keywords if k.isascii() and re.match(r'^[a-zA-Z0-9_-]+$', k)]
 
 
+# ============== RAG Context Gathering (System Contracts KB) ==============
+
+def _gather_rag_context(db: Session, question: str, user_id: str) -> list:
+    """
+    Vector-search the System Contracts KB for chunks relevant to the question.
+    Returns up to 5 text chunks as context for the LLM.
+    """
+    SYSTEM_KB_ID = "system-contracts-kb"
+    try:
+        from app.models.ai_provider import AIProvider
+        import httpx
+
+        # Only use providers with embedding capability (not the chat LLM)
+        provider = db.query(AIProvider).filter(
+            AIProvider.user_id == user_id,
+            AIProvider.is_active == True,
+            AIProvider.capabilities.contains(["embedding"]),
+        ).first()
+        if not provider:
+            # Fallback: any system-wide active embedding provider (matches indexing logic)
+            provider = db.query(AIProvider).filter(
+                AIProvider.is_active == True,
+                AIProvider.capabilities.contains(["embedding"]),
+            ).first()
+        if not provider:
+            return []
+
+        base = (provider.api_url or "").rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
+        headers = {"Content-Type": "application/json"}
+        if provider.api_key:
+            headers["Authorization"] = f"Bearer {provider.api_key}"
+
+        # Embed the question
+        if (provider.provider_type or "") == "ollama":
+            r = httpx.post(f"{base}/api/embeddings",
+                           json={"model": provider.model, "prompt": question},
+                           headers=headers, timeout=30.0)
+            r.raise_for_status()
+            vec = r.json().get("embedding", [])
+        else:
+            r = httpx.post(f"{base}/v1/embeddings",
+                           json={"model": provider.model, "input": [question]},
+                           headers=headers, timeout=30.0)
+            r.raise_for_status()
+            vec = r.json()["data"][0]["embedding"]
+
+        if not vec:
+            return []
+
+        vec_str = "[" + ",".join(str(v) for v in vec) + "]"
+        rows = db.execute(text("""
+            SELECT content, source_doc,
+                   1 - (embedding <=> CAST(:emb AS vector)) AS score
+            FROM vector_chunks
+            WHERE kb_id = :kid
+            ORDER BY embedding <=> CAST(:emb AS vector)
+            LIMIT 5
+        """), {"kid": SYSTEM_KB_ID, "emb": vec_str}).fetchall()
+
+        return [{"content": r[0], "source": r[1], "score": float(r[2])} for r in rows]
+
+    except Exception as e:
+        logger.warning(f"[RAG] System KB search failed: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return []
+
+
 # ============== Neo4j Context Gathering ==============
 
 def _gather_neo4j_context(keywords: List[str], intents: List[str], question: str) -> Dict[str, Any]:
@@ -543,6 +615,16 @@ def _build_system_prompt(ctx: Dict[str, Any]) -> str:
         for m in monthly:
             parts.append(f"  - {m['month']}: {m['count']} สัญญา | {m['value']:,.0f} บาท")
 
+    # RAG context from System Contracts KB
+    rag_chunks = ctx.get("rag_chunks", [])
+    if rag_chunks:
+        parts.append(f"\n=== ข้อความจากเอกสารสัญญา (System Contracts KB — {len(rag_chunks)} ส่วน) ===")
+        for i, chunk in enumerate(rag_chunks, 1):
+            src = chunk.get("source", "")
+            score = chunk.get("score", 0)
+            parts.append(f"\n[{i}] (แหล่งที่มา: {src} | ความเกี่ยวข้อง: {score:.2f})")
+            parts.append(chunk["content"][:800])
+
     # Neo4j Knowledge Graph context
     neo4j_entities = ctx.get("neo4j_entities", [])
     neo4j_rels = ctx.get("neo4j_relationships", [])
@@ -618,7 +700,12 @@ async def chat_query(
     neo4j_ctx = _gather_neo4j_context(keywords, intents, question)
     ctx.update(neo4j_ctx)
 
-    # 4. Build messages for LLM
+    # 4. Gather RAG context from System Contracts KB vector search
+    rag_chunks = _gather_rag_context(db, question, user_id)
+    if rag_chunks:
+        ctx["rag_chunks"] = rag_chunks
+
+    # 5. Build messages for LLM
     system_prompt = _build_system_prompt(ctx)
 
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
@@ -629,7 +716,7 @@ async def chat_query(
 
     messages.append({"role": "user", "content": question})
 
-    # 5. Call LLM
+    # 6. Call LLM
     try:
         raw_response = await _call_llm(db, user_id, messages)
     except HTTPException:
@@ -638,7 +725,7 @@ async def chat_query(
         logger.error(f"LLM call failed: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=f"AI ไม่สามารถตอบได้ในขณะนี้: {e}")
 
-    # 5. Parse response
+    # 7. Parse response
     parsed = _parse_llm_response(raw_response)
 
     return {

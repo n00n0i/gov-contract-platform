@@ -5,6 +5,7 @@ import os
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from pydantic import BaseModel
 
 from app.db.database import get_db
@@ -254,9 +255,10 @@ def save_notifications(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    prefs = user.preferences or {}
+    prefs = dict(user.preferences or {})
     prefs["notifications"] = settings.model_dump()
     user.preferences = prefs
+    flag_modified(user, "preferences")
     db.commit()
     
     logger.info(f"Notification settings updated for user {user_id}")
@@ -320,9 +322,10 @@ def save_preferences(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    prefs = user.preferences or {}
+    prefs = dict(user.preferences or {})
     prefs.update(settings.model_dump())
     user.preferences = prefs
+    flag_modified(user, "preferences")
     db.commit()
     
     logger.info(f"Preferences updated for user {user_id}")
@@ -403,11 +406,12 @@ def save_ocr_settings(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    prefs = user.preferences or {}
+    prefs = dict(user.preferences or {})
     prefs["ocr_settings"] = settings.model_dump()
     user.preferences = prefs
+    flag_modified(user, "preferences")
     db.commit()
-    
+
     logger.info(f"OCR settings updated for user {user_id}")
     return {
         "success": True,
@@ -469,7 +473,7 @@ def get_ai_settings(
     prefs = user.preferences or {}
     ai_prefs = prefs.get("ai_settings", {})
     
-    # Get active provider IDs from preferences (for backward compatibility)
+    # Get active provider IDs from preferences
     active_llm_id = ai_prefs.get("activeLLMId", "default-llm")
     active_embedding_id = ai_prefs.get("activeEmbeddingId", "default-embedding")
     
@@ -561,16 +565,15 @@ def save_ai_settings(
             )
             db.add(new_provider)
     
-    # Update user's active providers
-    user.active_llm_provider_id = settings.activeLLMId
-    user.active_embedding_provider_id = settings.activeEmbeddingId
-    
-    # Save features in preferences
-    prefs = user.preferences or {}
-    ai_prefs = prefs.get("ai_settings", {})
+    # Save active providers and features in preferences
+    prefs = dict(user.preferences or {})
+    ai_prefs = dict(prefs.get("ai_settings", {}))
+    ai_prefs["activeLLMId"] = settings.activeLLMId
+    ai_prefs["activeEmbeddingId"] = settings.activeEmbeddingId
     ai_prefs["features"] = settings.features
     prefs["ai_settings"] = ai_prefs
     user.preferences = prefs
+    flag_modified(user, "preferences")
     
     db.commit()
     
@@ -592,11 +595,12 @@ def save_ai_features(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    prefs = user.preferences or {}
-    ai_settings = prefs.get("ai_settings", {})
+    prefs = dict(user.preferences or {})
+    ai_settings = dict(prefs.get("ai_settings", {}))
     ai_settings["features"] = settings.model_dump()
     prefs["ai_settings"] = ai_settings
     user.preferences = prefs
+    flag_modified(user, "preferences")
     db.commit()
     
     logger.info(f"AI features updated for user {user_id}")
@@ -674,14 +678,15 @@ def set_default_provider(
         raise HTTPException(status_code=400, detail="Provider has no recognised capability (chat/embedding)")
 
     # Also keep preferences in sync for legacy code
-    prefs = user.preferences or {}
-    ai_prefs = prefs.get("ai_settings", {})
+    prefs = dict(user.preferences or {})
+    ai_prefs = dict(prefs.get("ai_settings", {}))
     if kind == "LLM":
         ai_prefs["activeLLMId"] = provider_id
     else:
         ai_prefs["activeEmbeddingId"] = provider_id
     prefs["ai_settings"] = ai_prefs
     user.preferences = prefs
+    flag_modified(user, "preferences")
 
     db.commit()
     logger.info(f"Set default {kind} provider to {provider_id} for user {user_id}")
@@ -843,9 +848,10 @@ def save_rag_settings(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    prefs = user.preferences or {}
+    prefs = dict(user.preferences or {})
     prefs["rag_settings"] = settings.model_dump()
     user.preferences = prefs
+    flag_modified(user, "preferences")
     db.commit()
 
     logger.info(f"RAG settings updated for user {user_id}")
@@ -889,9 +895,10 @@ def save_graphrag_settings(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    prefs = user.preferences or {}
+    prefs = dict(user.preferences or {})
     prefs["graphrag_settings"] = settings.model_dump()
     user.preferences = prefs
+    flag_modified(user, "preferences")
     db.commit()
 
     logger.info(f"GraphRAG settings updated for user {user_id}")
@@ -938,9 +945,10 @@ def save_contracts_graphrag_settings(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    prefs = user.preferences or {}
+    prefs = dict(user.preferences or {})
     prefs["contracts_graphrag_settings"] = settings.model_dump()
     user.preferences = prefs
+    flag_modified(user, "preferences")
     db.commit()
 
     logger.info(f"Contracts GraphRAG settings updated for user {user_id}")
@@ -985,9 +993,10 @@ def save_kb_graphrag_settings(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    prefs = user.preferences or {}
+    prefs = dict(user.preferences or {})
     prefs["kb_graphrag_settings"] = settings.model_dump()
     user.preferences = prefs
+    flag_modified(user, "preferences")
     db.commit()
 
     logger.info(f"KB GraphRAG settings updated for user {user_id}")

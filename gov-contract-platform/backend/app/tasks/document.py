@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.services.document.document_service import DocumentService
 from app.services.document.ocr_service import get_ocr_service
+from app.services.document.ocr_settings_service import get_ocr_settings_service
 from app.services.storage.minio_service import get_storage_service
 from app.services.graph import get_contracts_graph_service
 from app.models.graph_models import GraphEntity, GraphRelationship, GraphDocument, EntityType, RelationType, GraphDomain, SecurityLevel
@@ -352,6 +353,56 @@ def process_contract_rag_indexing(self, document_id: str, tenant_id: str = None)
         db.commit()
         logger.info(f"[RAG Task] Indexed {inserted}/{len(chunks)} chunks for document {document_id}")
 
+        # Update KB stats (document_count, total_chunks) from vector_chunks
+        try:
+            from app.models.ai_models import KnowledgeBase, KBDocument
+            from datetime import datetime
+            stats = db.execute(
+                text("SELECT COUNT(DISTINCT document_id), COUNT(*) FROM vector_chunks WHERE kb_id = :kid"),
+                {"kid": kb_id},
+            ).fetchone()
+            if stats:
+                kb_obj = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+                if kb_obj:
+                    kb_obj.document_count = stats[0]
+                    kb_obj.total_chunks = stats[1]
+                    kb_obj.last_synced_at = datetime.utcnow()
+                    db.commit()
+                    logger.info(f"[RAG Task] Updated KB stats: {stats[0]} docs, {stats[1]} chunks")
+        except Exception as stats_err:
+            logger.warning(f"[RAG Task] Failed to update KB stats: {stats_err}")
+            db.rollback()
+
+        # Create/update KBDocument record so the document appears in KB document list
+        try:
+            from app.models.ai_models import KBDocument
+            kb_doc = db.query(KBDocument).filter(
+                KBDocument.id == document_id,
+                KBDocument.kb_id == kb_id,
+            ).first()
+            if not kb_doc:
+                kb_doc = KBDocument(
+                    id=document_id,
+                    kb_id=kb_id,
+                    filename=document.original_filename or document.filename,
+                    storage_path=document.storage_path,
+                    storage_bucket=document.storage_bucket or "govplatform",
+                    mime_type=document.mime_type,
+                    file_size=document.file_size,
+                    status="indexed",
+                    chunk_count=inserted,
+                    uploaded_by=document.uploaded_by,
+                )
+                db.add(kb_doc)
+            else:
+                kb_doc.status = "indexed"
+                kb_doc.chunk_count = inserted
+            db.commit()
+            logger.info(f"[RAG Task] KBDocument record saved for {document_id}")
+        except Exception as kbdoc_err:
+            logger.warning(f"[RAG Task] Failed to create KBDocument record: {kbdoc_err}")
+            db.rollback()
+
         return {
             "status": "success",
             "document_id": document_id,
@@ -660,6 +711,22 @@ def process_graphrag_extraction(self, document_id: str, tenant_id: str = None) -
                 "relationships_extracted": len(relationships)
             }
 
+        # Update KBDocument entity_count for system-contracts-kb
+        try:
+            from app.models.ai_models import KBDocument
+            SYSTEM_KB_ID = "system-contracts-kb"
+            kb_doc = db.query(KBDocument).filter(
+                KBDocument.id == document_id,
+                KBDocument.kb_id == SYSTEM_KB_ID,
+            ).first()
+            if kb_doc:
+                kb_doc.entity_count = len(entities)
+                db.commit()
+                logger.info(f"[GraphRAG Task] Updated KBDocument entity_count={len(entities)} for {document_id}")
+        except Exception as kbdoc_err:
+            logger.warning(f"[GraphRAG Task] Failed to update KBDocument entity_count: {kbdoc_err}")
+            db.rollback()
+
         return {
             "status": "success",
             "document_id": document_id,
@@ -756,6 +823,198 @@ def generate_document_thumbnail(document_id: str, tenant_id: str = None) -> str:
     except Exception as e:
         logger.error(f"[Thumbnail Task] Error: {e}")
         return f"Error: {str(e)}"
+    finally:
+        db.close()
+
+
+@shared_task(bind=True, max_retries=0)
+def process_document_upload_job(self, job_id: str) -> Dict[str, Any]:
+    """
+    Async handler for DocumentProcessingJob.
+    Runs OCR + LLM extraction in background; user polls for completion.
+
+    Enhancement:
+    - Uses job.llm_provider_id and job.extraction_prompt if set.
+    - Caches OCR raw text as a .txt file in MinIO (job.ocr_text_path).
+      On re-run, if the .txt already exists it is reused (skipping OCR).
+    """
+    import re
+    from datetime import datetime as _dt
+    from app.models.document_job import DocumentProcessingJob
+
+    logger.info(f"[JobTask] Starting job {job_id}")
+    db = SessionLocal()
+    try:
+        job = db.query(DocumentProcessingJob).filter(DocumentProcessingJob.id == job_id).first()
+        if not job:
+            logger.error(f"[JobTask] Job {job_id} not found")
+            return {"status": "error", "reason": "job not found"}
+
+        # Mark as processing
+        job.status = "processing"
+        job.celery_task_id = self.request.id
+        db.commit()
+
+        storage = get_storage_service()
+
+        # ── 1. OCR  ───────────────────────────────────────────────────────
+        ocr_text = ""
+        page_count = 1
+        ocr_engine_name = "tesseract"
+        ocr_error_msg = None
+        ocr_text_minio_path = job.ocr_text_path  # may be None or a cached path
+
+        # Check if OCR cache already exists in MinIO
+        cache_loaded = False
+        if ocr_text_minio_path:
+            try:
+                cached_bytes = storage.download_file(ocr_text_minio_path)
+                ocr_text = cached_bytes.decode("utf-8")
+                cache_loaded = True
+                logger.info(f"[JobTask] OCR cache hit for job {job_id}: {ocr_text_minio_path}")
+            except Exception as cache_err:
+                logger.warning(f"[JobTask] OCR cache miss / error ({cache_err}) — will re-run OCR")
+                ocr_text_minio_path = None
+
+        if not cache_loaded:
+            # Download original file from MinIO and run OCR
+            try:
+                file_bytes = storage.download_file(job.storage_path)
+            except Exception as e:
+                raise RuntimeError(f"MinIO download failed: {e}")
+
+            try:
+                ocr_settings = get_ocr_settings_service(db=db, user_id=job.user_id)
+                from app.services.document.ocr_service import OCRService as _OCRService
+                ocr_svc = _OCRService(ocr_settings_service=ocr_settings)
+                result = ocr_svc.process_document(file_bytes, job.mime_type or "application/octet-stream")
+                if result.success:
+                    ocr_text = result.text or ""
+                    page_count = result.pages or 1
+                    ocr_engine_name = result.ocr_engine or "tesseract"
+                else:
+                    ocr_error_msg = result.error
+                    logger.warning(f"[JobTask] OCR failed for job {job_id}: {result.error}")
+            except Exception as e:
+                ocr_error_msg = str(e)
+                logger.warning(f"[JobTask] OCR exception for job {job_id}: {e}")
+
+            # Save OCR text to MinIO as .txt cache
+            if ocr_text:
+                try:
+                    import io as _io
+                    txt_bytes = ocr_text.encode("utf-8")
+                    # Derive storage folder from original file path
+                    base_folder = "/".join(job.storage_path.split("/")[:-1])
+                    txt_path = f"{base_folder}/{job_id}_ocr.txt"
+                    storage.upload_file(
+                        file_data=_io.BytesIO(txt_bytes),
+                        filename=f"{job_id}_ocr.txt",
+                        content_type="text/plain; charset=utf-8",
+                        folder=base_folder,
+                        metadata={"job_id": job_id, "type": "ocr_cache"},
+                    )
+                    ocr_text_minio_path = txt_path
+                    logger.info(f"[JobTask] OCR text saved to MinIO: {txt_path}")
+                except Exception as save_err:
+                    logger.warning(f"[JobTask] Could not save OCR text to MinIO: {save_err}")
+
+        # ── 2. LLM extraction  ────────────────────────────────────────────
+        from app.models.identity import User
+        from app.models.ai_provider import AIProvider
+
+        extracted_data: dict = {}
+        llm_error_msg = None
+
+        if ocr_text:
+            try:
+                provider = None
+
+                # Priority 1: provider explicitly chosen in upload wizard
+                if job.llm_provider_id:
+                    provider = db.query(AIProvider).filter(
+                        AIProvider.id == job.llm_provider_id,
+                    ).first()
+
+                # Priority 2: user's active default LLM provider
+                if not provider:
+                    user = db.query(User).filter(User.id == job.user_id).first()
+                    if user and getattr(user, "active_llm_provider_id", None):
+                        provider = db.query(AIProvider).filter(
+                            AIProvider.id == user.active_llm_provider_id
+                        ).first()
+
+                # Priority 3: any active LLM provider for this user
+                if not provider:
+                    provider = db.query(AIProvider).filter(
+                        AIProvider.user_id == job.user_id,
+                        AIProvider.is_active == True,
+                    ).first()
+
+                if provider:
+                    # Use job's custom prompt or default
+                    DEFAULT_PROMPT = (
+                        "สกัดข้อมูลสัญญาจากข้อความ OCR ต่อไปนี้ ตอบในรูปแบบ JSON เท่านั้น ห้ามมีข้อความอื่น:\n"
+                        "{\n"
+                        '  "contract_number": "เลขที่สัญญา (ถ้าไม่พบ ใส่ null)",\n'
+                        '  "title": "ชื่อโครงการ/สัญญา",\n'
+                        '  "counterparty": "ชื่อผู้รับจ้าง/คู่สัญญา",\n'
+                        '  "contract_type": "service|construction|procurement|consulting|other",\n'
+                        '  "contract_value": 0.0,\n'
+                        '  "project_name": "ชื่อโครงการ",\n'
+                        '  "start_date": "YYYY-MM-DD หรือ null",\n'
+                        '  "end_date": "YYYY-MM-DD หรือ null",\n'
+                        '  "summary": "สรุปเนื้อหาสำคัญของสัญญา 3-5 ประโยค"\n'
+                        "}\n\nข้อความ OCR:\n"
+                    )
+                    chosen_prompt = job.extraction_prompt if job.extraction_prompt else DEFAULT_PROMPT
+                    full_prompt = f"{chosen_prompt}\n{ocr_text[:4000]}"
+                    llm_response = _sync_llm_call(provider, full_prompt)
+                    if llm_response:
+                        m = re.search(r"\{.*\}", llm_response, re.DOTALL)
+                        if m:
+                            try:
+                                extracted_data = json.loads(m.group())
+                            except json.JSONDecodeError as e:
+                                llm_error_msg = f"JSON parse error: {e}"
+                        else:
+                            llm_error_msg = "No JSON in LLM response"
+                    else:
+                        llm_error_msg = "Empty LLM response"
+                else:
+                    llm_error_msg = "No LLM provider configured"
+            except Exception as e:
+                llm_error_msg = str(e)
+                logger.warning(f"[JobTask] LLM extraction failed for job {job_id}: {e}")
+        else:
+            llm_error_msg = "No OCR text available — skipping LLM"
+
+        # ── 3. Update job to completed  ───────────────────────────────────
+        job.status = "completed"
+        job.extracted_text = ocr_text
+        job.extracted_data = extracted_data
+        job.page_count = page_count
+        job.ocr_engine = ocr_engine_name
+        job.ocr_error = ocr_error_msg
+        job.llm_error = llm_error_msg
+        job.ocr_text_path = ocr_text_minio_path
+        job.completed_at = _dt.utcnow()
+        db.commit()
+        logger.info(f"[JobTask] Completed job {job_id}")
+        return {"status": "completed", "job_id": job_id}
+
+    except Exception as exc:
+        logger.error(f"[JobTask] Exception for job {job_id}: {exc}")
+        try:
+            from app.models.document_job import DocumentProcessingJob as _Job
+            job = db.query(_Job).filter(_Job.id == job_id).first()
+            if job:
+                job.status = "failed"
+                job.ocr_error = str(exc)
+                db.commit()
+        except Exception:
+            pass
+        return {"status": "failed", "job_id": job_id, "error": str(exc)}
     finally:
         db.close()
 

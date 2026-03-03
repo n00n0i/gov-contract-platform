@@ -10,7 +10,7 @@ import {
   Settings2, Workflow, Cpu, MessagesSquare, Key, Settings as SettingsIcon, Clock,
   BookOpen, X, Users, UserPlus, UserCog, Building2, ChevronRight, ChevronDown, FolderTree, Zap,
   HardDrive, FileArchive, BrainCircuit, DatabaseBackup, Layers,
-  Loader2, Upload, MessageSquare
+  Loader2, Upload, MessageSquare, RefreshCw
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
@@ -443,32 +443,16 @@ function ProviderForm({
   }
 
   // Filter models by type based on name patterns
-  const filterModelsByType = (models: string[], modelType: 'llm' | 'embedding', providerType: string): string[] => {
-    // OpenAI compatible models have specific patterns
-    if (providerType === 'openai-compatible') {
-      if (modelType === 'embedding') {
-        // OpenAI embedding models
-        return models.filter(m =>
-          m.includes('embedding') ||
-          m.includes('text-embedding-3') ||
-          m.includes('text-embedding-ada')
-        )
-      } else {
-        // OpenAI LLM models (exclude embeddings)
-        return models.filter(m => !m.includes('embedding'))
-      }
-    }
-
-    // Ollama and other providers
+  const filterModelsByType = (models: string[], modelType: 'llm' | 'embedding', _providerType: string): string[] => {
     const embeddingPatterns = [
       'embed', 'embedding', 'bge-', 'e5-', 'gte-', 'jina-embed',
       'nomic-embed', 'mxbai-embed', 'snowflake-arctic-embed',
-      'multilingual-e5', 'all-minilm'
+      'multilingual-e5', 'all-minilm', 'text-embedding'
     ]
 
     const visionPatterns = ['vision', 'vl-', 'mm-', 'multimodal', 'llava']
 
-    return models.filter(model => {
+    const filtered = models.filter(model => {
       const lowerModel = model.toLowerCase()
       const isEmbedding = embeddingPatterns.some(p => lowerModel.includes(p))
       const isVision = visionPatterns.some(p => lowerModel.includes(p))
@@ -480,6 +464,9 @@ function ProviderForm({
         return !isEmbedding && !isVision
       }
     })
+
+    // If no models matched the patterns, return all models so user can still pick
+    return filtered.length > 0 ? filtered : models
   }
 
   const fetchModels = async () => {
@@ -895,7 +882,32 @@ export default function Settings() {
 
   // Show/Hide API Keys
   const [showTyphoonKey, setShowTyphoonKey] = useState(false)
+  const [showOllamaKey, setShowOllamaKey] = useState(false)
   const [showCustomApiKey, setShowCustomApiKey] = useState(false)
+
+  // OCR Model Fetch
+  const [ollamaModels, setOllamaModels] = useState<string[]>([])
+  const [customModels, setCustomModels] = useState<string[]>([])
+  const [fetchingOllamaModels, setFetchingOllamaModels] = useState(false)
+  const [fetchingCustomModels, setFetchingCustomModels] = useState(false)
+
+  const fetchOcrModels = async (mode: 'ollama' | 'custom') => {
+    const url = mode === 'ollama' ? ocrSettings.ollama_url : ocrSettings.custom_api_url
+    const apiKey = mode === 'ollama' ? ocrSettings.ollama_key : ocrSettings.custom_api_key
+    if (!url) return
+    const setLoading = mode === 'ollama' ? setFetchingOllamaModels : setFetchingCustomModels
+    const setModels = mode === 'ollama' ? setOllamaModels : setCustomModels
+    setLoading(true)
+    try {
+      const type = mode === 'ollama' ? 'ollama' : 'openai-compatible'
+      const res = await api.post('/settings/ai/fetch-models', { type, url, api_key: apiKey })
+      setModels(res.data?.models || [])
+    } catch {
+      setModels([])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // 2FA State
   const [twoFAStatus, setTwoFAStatus] = useState({ enabled: false, has_secret: false })
@@ -947,7 +959,7 @@ export default function Settings() {
 
   // OCR Settings
   const [ocrSettings, setOcrSettings] = useState({
-    mode: 'default', // 'default' | 'typhoon' | 'custom'
+    mode: 'default', // 'default' | 'typhoon' | 'ollama' | 'custom'
     engine: 'tesseract',
     language: 'tha+eng',
     dpi: 300,
@@ -966,7 +978,11 @@ export default function Settings() {
     typhoon_top_p: 0.6,
     typhoon_repetition_penalty: 1.2,
     typhoon_pages: '', // JSON array e.g. [1, 2, 3]
-    // Custom API settings
+    // Ollama settings (direct Ollama endpoint, no prompt needed)
+    ollama_url: '',
+    ollama_key: '',
+    ollama_model: '',
+    // Custom API settings (OpenAI-compatible with prompt)
     custom_api_url: '',
     custom_api_key: '',
     custom_api_model: '',
@@ -1393,18 +1409,18 @@ export default function Settings() {
       const t = full || template
       setDraftTemplate(t)
       const vars: Record<string, string> = {}
-      ;(t.variables || []).forEach(v => { vars[v.key] = v.default || '' })
+        ; (t.variables || []).forEach(v => { vars[v.key] = v.default || '' })
       setDraftVarValues(vars)
       const conds: Record<string, string> = {}
-      ;(t.conditionalGroups || []).forEach(g => { conds[g.key] = g.default || g.options[0]?.value || '' })
+        ; (t.conditionalGroups || []).forEach(g => { conds[g.key] = g.default || g.options[0]?.value || '' })
       setDraftConditionals(conds)
     } catch {
       // Fallback to list data
       const vars: Record<string, string> = {}
-      ;(template.variables || []).forEach(v => { vars[v.key] = v.default || '' })
+        ; (template.variables || []).forEach(v => { vars[v.key] = v.default || '' })
       setDraftVarValues(vars)
       const conds: Record<string, string> = {}
-      ;(template.conditionalGroups || []).forEach(g => { conds[g.key] = g.default || g.options[0]?.value || '' })
+        ; (template.conditionalGroups || []).forEach(g => { conds[g.key] = g.default || g.options[0]?.value || '' })
       setDraftConditionals(conds)
     } finally {
       setDraftFetching(false)
@@ -2701,7 +2717,7 @@ export default function Settings() {
 
                   {/* Mode Selection */}
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       {/* Tesseract Option */}
                       <button
                         onClick={() => setOcrSettings({ ...ocrSettings, mode: 'default' })}
@@ -2711,13 +2727,12 @@ export default function Settings() {
                           }`}
                       >
                         <div className="flex items-center gap-3 mb-2">
-                          <div className={`w-4 h-4 rounded-full border-2 ${ocrSettings.mode === 'default' ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
-                            }`}>
+                          <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${ocrSettings.mode === 'default' ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`}>
                             {ocrSettings.mode === 'default' && <div className="w-2 h-2 bg-white rounded-full m-0.5" />}
                           </div>
                           <span className="font-semibold text-gray-900">Tesseract</span>
                         </div>
-                        <p className="text-sm text-gray-500 ml-7">OCR ในเครื่อง (ฟรี ไม่ต้องตั้งค่า)</p>
+                        <p className="text-xs text-gray-500 ml-7">OCR ในเครื่อง (ฟรี)</p>
                       </button>
 
                       {/* Typhoon OCR Option */}
@@ -2729,31 +2744,46 @@ export default function Settings() {
                           }`}
                       >
                         <div className="flex items-center gap-3 mb-2">
-                          <div className={`w-4 h-4 rounded-full border-2 ${ocrSettings.mode === 'typhoon' ? 'border-purple-500 bg-purple-500' : 'border-gray-300'
-                            }`}>
+                          <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${ocrSettings.mode === 'typhoon' ? 'border-purple-500 bg-purple-500' : 'border-gray-300'}`}>
                             {ocrSettings.mode === 'typhoon' && <div className="w-2 h-2 bg-white rounded-full m-0.5" />}
                           </div>
                           <span className="font-semibold text-gray-900">Typhoon OCR</span>
                         </div>
-                        <p className="text-sm text-gray-500 ml-7">OpenThailand OCR API</p>
+                        <p className="text-xs text-gray-500 ml-7">OpenThailand API</p>
+                      </button>
+
+                      {/* Ollama Option */}
+                      <button
+                        onClick={() => setOcrSettings({ ...ocrSettings, mode: 'ollama' })}
+                        className={`p-4 rounded-xl border-2 text-left transition ${ocrSettings.mode === 'ollama'
+                          ? 'border-green-500 bg-green-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                      >
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${ocrSettings.mode === 'ollama' ? 'border-green-500 bg-green-500' : 'border-gray-300'}`}>
+                            {ocrSettings.mode === 'ollama' && <div className="w-2 h-2 bg-white rounded-full m-0.5" />}
+                          </div>
+                          <span className="font-semibold text-gray-900">Ollama</span>
+                        </div>
+                        <p className="text-xs text-gray-500 ml-7">Vision model (local)</p>
                       </button>
 
                       {/* Custom API Option */}
                       <button
                         onClick={() => setOcrSettings({ ...ocrSettings, mode: 'custom' })}
                         className={`p-4 rounded-xl border-2 text-left transition ${ocrSettings.mode === 'custom'
-                          ? 'border-green-500 bg-green-50'
+                          ? 'border-orange-500 bg-orange-50'
                           : 'border-gray-200 hover:border-gray-300'
                           }`}
                       >
                         <div className="flex items-center gap-3 mb-2">
-                          <div className={`w-4 h-4 rounded-full border-2 ${ocrSettings.mode === 'custom' ? 'border-green-500 bg-green-500' : 'border-gray-300'
-                            }`}>
+                          <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${ocrSettings.mode === 'custom' ? 'border-orange-500 bg-orange-500' : 'border-gray-300'}`}>
                             {ocrSettings.mode === 'custom' && <div className="w-2 h-2 bg-white rounded-full m-0.5" />}
                           </div>
                           <span className="font-semibold text-gray-900">Custom API</span>
                         </div>
-                        <p className="text-sm text-gray-500 ml-7">OCR ภายนอกอื่นๆ</p>
+                        <p className="text-xs text-gray-500 ml-7">OpenAI-compatible + prompt</p>
                       </button>
                     </div>
 
@@ -2943,12 +2973,102 @@ export default function Settings() {
                       </div>
                     )}
 
-                    {/* Custom API Settings */}
-                    {ocrSettings.mode === 'custom' && (
+                    {/* Ollama Settings */}
+                    {ocrSettings.mode === 'ollama' && (
                       <div className="p-4 bg-green-50 rounded-xl space-y-4">
                         <div className="flex items-center gap-2 mb-2">
                           <Key className="w-4 h-4 text-green-600" />
-                          <span className="font-medium text-green-900">การตั้งค่า Custom API</span>
+                          <span className="font-medium text-green-900">การตั้งค่า Ollama</span>
+                        </div>
+                        <p className="text-sm text-gray-600 bg-white rounded-lg p-3 border border-green-200">
+                          ใช้ vision model ที่รันบน Ollama โดยตรง — ไม่ต้องตั้งค่า prompt
+                          ระบบจะส่งภาพทีละหน้าและรวมผลลัพธ์ทั้งหมดให้อัตโนมัติ
+                        </p>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Ollama URL <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="url"
+                            placeholder="http://localhost:11434"
+                            value={ocrSettings.ollama_url}
+                            onChange={(e) => setOcrSettings({ ...ocrSettings, ollama_url: e.target.value })}
+                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Base URL ของ Ollama server เช่น http://192.168.1.10:11434</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Model <span className="text-red-500">*</span>
+                          </label>
+                          <div className="flex gap-2">
+                            {ollamaModels.length > 0 ? (
+                              <select
+                                value={ocrSettings.ollama_model}
+                                onChange={(e) => setOcrSettings({ ...ocrSettings, ollama_model: e.target.value })}
+                                className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                              >
+                                <option value="">-- เลือก Model --</option>
+                                {ollamaModels.map(m => <option key={m} value={m}>{m}</option>)}
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                placeholder="scb10x/typhoon-ocr1.5-3b"
+                                value={ocrSettings.ollama_model}
+                                onChange={(e) => setOcrSettings({ ...ocrSettings, ollama_model: e.target.value })}
+                                className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => fetchOcrModels('ollama')}
+                              disabled={!ocrSettings.ollama_url || fetchingOllamaModels}
+                              className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm whitespace-nowrap"
+                            >
+                              {fetchingOllamaModels ? '...' : 'ดึง Models'}
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">ชื่อ vision model ใน Ollama</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            API Key (optional)
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showOllamaKey ? 'text' : 'password'}
+                              placeholder="ไม่ต้องใส่ถ้า Ollama ไม่มี auth"
+                              value={ocrSettings.ollama_key}
+                              onChange={(e) => setOcrSettings({ ...ocrSettings, ollama_key: e.target.value })}
+                              className="w-full px-4 py-2 pr-20 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                            />
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                              {ocrSettings.ollama_key && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowOllamaKey(!showOllamaKey)}
+                                  className="p-1 hover:bg-gray-100 rounded transition"
+                                >
+                                  {showOllamaKey ? <EyeOff className="w-4 h-4 text-gray-500" /> : <Eye className="w-4 h-4 text-gray-500" />}
+                                </button>
+                              )}
+                              <Key className="w-4 h-4 text-gray-400" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Custom API Settings */}
+                    {ocrSettings.mode === 'custom' && (
+                      <div className="p-4 bg-orange-50 rounded-xl space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Key className="w-4 h-4 text-orange-600" />
+                          <span className="font-medium text-orange-900">การตั้งค่า Custom API</span>
                         </div>
 
                         <div>
@@ -2957,17 +3077,17 @@ export default function Settings() {
                           </label>
                           <input
                             type="url"
-                            placeholder="https://api.example.com/ocr"
+                            placeholder="https://api.example.com"
                             value={ocrSettings.custom_api_url}
                             onChange={(e) => setOcrSettings({ ...ocrSettings, custom_api_url: e.target.value })}
-                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                           />
-                          <p className="text-xs text-gray-500 mt-1">URL ของ OCR API endpoint</p>
+                          <p className="text-xs text-gray-500 mt-1">Base URL ของ OpenAI-compatible API</p>
                         </div>
 
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            API Key <span className="text-red-500">*</span>
+                            API Key
                           </label>
                           <div className="relative">
                             <input
@@ -2975,7 +3095,7 @@ export default function Settings() {
                               placeholder="sk-xxxxxxxxxxxxxxxx"
                               value={ocrSettings.custom_api_key}
                               onChange={(e) => setOcrSettings({ ...ocrSettings, custom_api_key: e.target.value })}
-                              className="w-full px-4 py-2 pr-20 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                              className="w-full px-4 py-2 pr-20 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                             />
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
                               {ocrSettings.custom_api_key && (
@@ -2983,32 +3103,47 @@ export default function Settings() {
                                   type="button"
                                   onClick={() => setShowCustomApiKey(!showCustomApiKey)}
                                   className="p-1 hover:bg-gray-100 rounded transition"
-                                  title={showCustomApiKey ? 'ซ่อน' : 'แสดง'}
                                 >
-                                  {showCustomApiKey ? (
-                                    <EyeOff className="w-4 h-4 text-gray-500" />
-                                  ) : (
-                                    <Eye className="w-4 h-4 text-gray-500" />
-                                  )}
+                                  {showCustomApiKey ? <EyeOff className="w-4 h-4 text-gray-500" /> : <Eye className="w-4 h-4 text-gray-500" />}
                                 </button>
                               )}
                               <Key className="w-4 h-4 text-gray-400" />
                             </div>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">API Key สำหรับยืนยันตัวตน</p>
                         </div>
 
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Model (optional)
+                            Model <span className="text-red-500">*</span>
                           </label>
-                          <input
-                            type="text"
-                            placeholder="e.g., gpt-4-vision, azure-ocr-v3"
-                            value={ocrSettings.custom_api_model}
-                            onChange={(e) => setOcrSettings({ ...ocrSettings, custom_api_model: e.target.value })}
-                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          />
+                          <div className="flex gap-2">
+                            {customModels.length > 0 ? (
+                              <select
+                                value={ocrSettings.custom_api_model}
+                                onChange={(e) => setOcrSettings({ ...ocrSettings, custom_api_model: e.target.value })}
+                                className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                              >
+                                <option value="">-- เลือก Model --</option>
+                                {customModels.map(m => <option key={m} value={m}>{m}</option>)}
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                placeholder="e.g., gpt-4o, ollama/typhoon-ocr1.5-3b"
+                                value={ocrSettings.custom_api_model}
+                                onChange={(e) => setOcrSettings({ ...ocrSettings, custom_api_model: e.target.value })}
+                                className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => fetchOcrModels('custom')}
+                              disabled={!ocrSettings.custom_api_url || fetchingCustomModels}
+                              className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm whitespace-nowrap"
+                            >
+                              {fetchingCustomModels ? '...' : 'ดึง Models'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -3581,11 +3716,24 @@ export default function Settings() {
                     <ProviderForm
                       initialData={null}
                       defaultModelType="llm"
-                      onSave={(provider) => {
+                      onSave={async (provider) => {
                         const newProvider = { ...provider, id: `provider-${Date.now()}` }
-                        setAiProviders([...aiProviders, newProvider])
-                        setActiveLLMId(newProvider.id)
+                        const updatedProviders = [...aiProviders, newProvider]
+                        const newActiveLLMId = newProvider.id
+                        setAiProviders(updatedProviders)
+                        setActiveLLMId(newActiveLLMId)
                         setShowAddLLM(false)
+                        try {
+                          await saveAISettings({
+                            providers: updatedProviders,
+                            activeLLMId: newActiveLLMId,
+                            activeEmbeddingId,
+                            features: aiFeatures
+                          })
+                          setMessage({ type: 'success', text: 'เพิ่ม LLM Model สำเร็จ' })
+                        } catch {
+                          setMessage({ type: 'error', text: 'เพิ่ม LLM Model ไม่สำเร็จ กรุณากด "บันทึก" ด้วยตนเอง' })
+                        }
                       }}
                       onCancel={() => setShowAddLLM(false)}
                     />
@@ -3608,11 +3756,24 @@ export default function Settings() {
                     <ProviderForm
                       initialData={null}
                       defaultModelType="embedding"
-                      onSave={(provider) => {
+                      onSave={async (provider) => {
                         const newProvider = { ...provider, id: `provider-${Date.now()}` }
-                        setAiProviders([...aiProviders, newProvider])
-                        setActiveEmbeddingId(newProvider.id)
+                        const updatedProviders = [...aiProviders, newProvider]
+                        const newActiveEmbeddingId = newProvider.id
+                        setAiProviders(updatedProviders)
+                        setActiveEmbeddingId(newActiveEmbeddingId)
                         setShowAddEmbedding(false)
+                        try {
+                          await saveAISettings({
+                            providers: updatedProviders,
+                            activeLLMId,
+                            activeEmbeddingId: newActiveEmbeddingId,
+                            features: aiFeatures
+                          })
+                          setMessage({ type: 'success', text: 'เพิ่ม Embedding Model สำเร็จ' })
+                        } catch {
+                          setMessage({ type: 'error', text: 'เพิ่ม Embedding Model ไม่สำเร็จ กรุณากด "บันทึก" ด้วยตนเอง' })
+                        }
                       }}
                       onCancel={() => setShowAddEmbedding(false)}
                     />
@@ -3635,9 +3796,21 @@ export default function Settings() {
                     <ProviderForm
                       initialData={editingProvider}
                       defaultModelType={editingProvider.modelType}
-                      onSave={(provider) => {
-                        setAiProviders(aiProviders.map(p => p.id === provider.id ? provider : p))
+                      onSave={async (provider) => {
+                        const updatedProviders = aiProviders.map(p => p.id === provider.id ? provider : p)
+                        setAiProviders(updatedProviders)
                         setEditingProvider(null)
+                        try {
+                          await saveAISettings({
+                            providers: updatedProviders,
+                            activeLLMId,
+                            activeEmbeddingId,
+                            features: aiFeatures
+                          })
+                          setMessage({ type: 'success', text: 'แก้ไข Model สำเร็จ' })
+                        } catch {
+                          setMessage({ type: 'error', text: 'แก้ไข Model ไม่สำเร็จ กรุณากด "บันทึก" ด้วยตนเอง' })
+                        }
                       }}
                       onCancel={() => setEditingProvider(null)}
                     />
@@ -6073,25 +6246,26 @@ function StorageSettings() {
     }
   }
 
-  // Clear ALL contract data (contracts DB + MinIO + GraphRAG + vector_chunks)
+  // Clear all contracts: remove DB + KB + GraphRAG, reset jobs → pending (keep MinIO files)
   const handleClearAllContracts = async () => {
     const first = confirm(
-      '⚠️ คำเตือน: ล้างข้อมูลสัญญาทั้งหมด\n\n' +
+      '⚠️ ล้างข้อมูลทั้งหมด (เก็บไฟล์ MinIO ไว้)\n\n' +
       'การกระทำนี้จะ:\n' +
-      '• ลบสัญญาทั้งหมดออกจากฐานข้อมูล (ถาวร)\n' +
-      '• ลบไฟล์ทั้งหมดออกจาก MinIO\n' +
-      '• ล้าง GraphRAG (Neo4j) ทั้งหมด\n' +
-      '• ล้าง Vector chunks (RAG) ทั้งหมด\n\n' +
-      '⛔ ไม่สามารถกู้คืนได้ — คุณแน่ใจหรือไม่?'
+      '• ลบ Contracts ออกจาก DB (ถาวร)\n' +
+      '• ล้าง System Contract KB (vector chunks)\n' +
+      '• ล้าง GraphRAG (Neo4j)\n' +
+      '• รีเซ็ต Job ทั้งหมด → pending (ยังประมวลผลใหม่จาก MinIO ได้)\n' +
+      '• ⚠️ ไฟล์ MinIO ยังคงอยู่\n\n' +
+      'คุณแน่ใจหรือไม่?'
     )
     if (!first) return
 
-    const second = confirm('ยืนยันอีกครั้ง: ลบข้อมูลสัญญาทั้งหมดถาวร ใช่หรือไม่?')
+    const second = confirm('ยืนยันอีกครั้ง: ล้าง DB + KB + GraphRAG และรีเซ็ต Jobs ใช่หรือไม่?')
     if (!second) return
 
     try {
       const token = localStorage.getItem('access_token')
-      const response = await fetch('/api/v1/admin/contracts/clear-all?confirm=true', {
+      const response = await fetch('/api/v1/admin/contracts/reset-for-rebuild?confirm=true', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       })
@@ -6104,45 +6278,45 @@ function StorageSettings() {
 
       if (response.ok) {
         const r = await response.json()
-        const graphPart = r.deleted_graph_entities > 0
-          ? `, Graph: ${r.deleted_graph_entities} entities, ${r.deleted_graph_relationships} relations`
-          : ''
-        const vecPart = r.deleted_vector_chunks > 0 ? `, Vector: ${r.deleted_vector_chunks} chunks` : ''
         setMessage({
           type: 'success',
-          text: `ล้างสำเร็จ: ${r.deleted_contracts} สัญญา, ${r.deleted_minio_files} ไฟล์${vecPart}${graphPart}`,
+          text: `รีเซ็ตสำเร็จ: ลบ ${r.deleted_contracts} สัญญา, รีเซ็ต ${r.jobs_reset_to_pending} jobs → pending, GraphRAG: ${r.deleted_graph_entities} entities`,
         })
         fetchMinioStats()
         fetchRagStats()
-        setTimeout(() => setMessage(null), 5000)
+        setTimeout(() => setMessage(null), 6000)
       } else {
         const error = await response.json()
-        setMessage({ type: 'error', text: error.detail || 'ไม่สามารถล้างข้อมูลสัญญาได้' })
+        setMessage({ type: 'error', text: error.detail || 'ไม่สามารถรีเซ็ตข้อมูลได้' })
       }
     } catch (err) {
-      console.error('Failed to clear all contracts:', err)
-      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการล้างข้อมูลสัญญา' })
+      console.error('Failed to reset for rebuild:', err)
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการรีเซ็ต' })
     }
   }
 
-  // Clear All Storage (MinIO + RAG + GraphRAG)
+  // Nuclear: ลบทุกอย่าง รวม MinIO + Jobs
   const handleClearAllStorage = async () => {
-    if (!confirm('⚠️ คำเตือน: การล้างข้อมูลทั้งหมด\n\nการกระทำนี้จะ:\n• ลบไฟล์ทั้งหมดจาก MinIO\n• ลบข้อมูล RAG ทั้งหมด\n• ลบ GraphRAG (Entities, Relationships) ทั้งหมด\n• ไฟล์จะถูก soft-delete (สามารถกู้คืนจาก Database ได้)\n\nคุณแน่ใจหรือไม่?')) {
-      return
-    }
+    const first = confirm(
+      '⛔ ลบทุกอย่างถาวร รวม MinIO + Jobs\n\n' +
+      'การกระทำนี้จะ:\n' +
+      '• ลบ Contracts ออกจาก DB (ถาวร)\n' +
+      '• ล้าง System Contract KB\n' +
+      '• ล้าง GraphRAG (Neo4j)\n' +
+      '• ลบ Job ทั้งหมด (ถาวร)\n' +
+      '• ลบไฟล์ทั้งหมดจาก MinIO (ถาวร)\n\n' +
+      '⛔ ไม่สามารถกู้คืนได้เลย — คุณแน่ใจหรือไม่?'
+    )
+    if (!first) return
 
-    // Second confirmation
-    if (!confirm('ยืนยันอีกครั้ง: ต้องการลบไฟล์ทั้งหมดจริงๆ ใช่หรือไม่?')) {
-      return
-    }
+    const second = confirm('ยืนยันอีกครั้ง: ลบทุกอย่างรวม MinIO + Jobs ถาวร ใช่หรือไม่?')
+    if (!second) return
 
     try {
       const token = localStorage.getItem('access_token')
-      const response = await fetch('/api/v1/admin/storage/minio/clear?confirm=true', {
+      const response = await fetch('/api/v1/admin/contracts/nuke-all?confirm=true', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` },
       })
 
       if (response.status === 403) {
@@ -6154,20 +6328,22 @@ function StorageSettings() {
       if (response.ok) {
         const result = await response.json()
         const graphMsg = result.deleted_graph_entities > 0
-          ? `, Graph: ${result.deleted_graph_entities} entities, ${result.deleted_graph_relationships} relations`
+          ? `, Graph: ${result.deleted_graph_entities} entities`
           : ''
-        setMessage({ type: 'success', text: `ล้างข้อมูลสำเร็จ: ${result.deleted_files || 0} ไฟล์${graphMsg}` })
+        setMessage({
+          type: 'success',
+          text: `ลบสำเร็จ: ${result.deleted_contracts} สัญญา, ${result.deleted_minio_files} ไฟล์ MinIO, ${result.deleted_jobs} jobs${graphMsg}`,
+        })
         fetchMinioStats()
         fetchRagStats()
-        // Note: GraphRAG stats will refresh on page reload or tab switch
-        setTimeout(() => setMessage(null), 3000)
+        setTimeout(() => setMessage(null), 6000)
       } else {
         const error = await response.json()
-        setMessage({ type: 'error', text: error.detail || 'ไม่สามารถล้างข้อมูลได้' })
+        setMessage({ type: 'error', text: error.detail || 'ไม่สามารถลบข้อมูลได้' })
       }
     } catch (err) {
-      console.error('Failed to clear all storage:', err)
-      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการล้างข้อมูล' })
+      console.error('Failed to nuke all:', err)
+      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการลบข้อมูล' })
     }
   }
 
@@ -6521,46 +6697,93 @@ function StorageSettings() {
           </div>
 
           {/* MinIO Danger Zone - Clear All */}
-          <div className="bg-red-50 rounded-xl shadow-sm border border-red-200 p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <AlertTriangle className="w-5 h-5 text-red-600" />
-              <h3 className="text-lg font-semibold text-red-900">Danger Zone</h3>
+          <div className="rounded-xl shadow-sm border border-red-200 overflow-hidden">
+            <div className="bg-red-600 px-6 py-4 flex items-center gap-3">
+              <AlertTriangle className="w-5 h-5 text-white" />
+              <h3 className="text-base font-semibold text-white">⚠️ Danger Zone — การดำเนินการเหล่านี้ไม่สามารถย้อนกลับได้</h3>
             </div>
 
-            <div className="space-y-4">
-              {/* Clear contracts (DB + MinIO + GraphRAG + vector) */}
-              <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-200">
-                <div>
-                  <p className="font-medium text-red-900">ล้างพื้นที่จัดเก็บสัญญา</p>
-                  <p className="text-sm text-red-600">
-                    ลบสัญญาทั้งหมดออกจาก DB, ไฟล์ MinIO, GraphRAG (Neo4j), และ Vector chunks — ถาวร
-                  </p>
+            <div className="bg-red-50 space-y-0 divide-y divide-red-200">
+
+              {/* ── Option 1: Reset for Rebuild ── */}
+              <div className="p-6">
+                <div className="flex items-start justify-between gap-6">
+                  <div className="flex-1">
+                    <p className="font-semibold text-red-900 text-base mb-1">
+                      ล้างข้อมูลทั้งหมด (เก็บไฟล์ MinIO ไว้)
+                    </p>
+                    <p className="text-sm text-red-700 mb-3">
+                      ล้าง DB, ล้าง system contract KB, ล้าง GraphRAG — แล้วรีเซ็ต Job data กลับเป็น "พร้อม rebuild" เพื่อให้ประมวลผลใหม่จากไฟล์เดิมใน MinIO ได้
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { label: 'ลบ DB (Contracts)', icon: '🗄️' },
+                        { label: 'ล้าง System KB', icon: '📚' },
+                        { label: 'ล้าง GraphRAG', icon: '🕸️' },
+                        { label: 'Jobs → Pending', icon: '🔄', highlight: true },
+                        { label: 'MinIO: คงอยู่', icon: '💾', safe: true },
+                      ].map(t => (
+                        <span key={t.label} className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium border ${t.safe
+                          ? 'bg-green-50 text-green-700 border-green-200'
+                          : t.highlight
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-red-100 text-red-700 border-red-200'
+                          }`}>
+                          <span>{t.icon}</span> {t.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleClearAllContracts}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-orange-600 text-white text-sm font-semibold rounded-lg hover:bg-orange-700 transition whitespace-nowrap shadow-sm flex-shrink-0"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    ล้าง & Reset Jobs
+                  </button>
                 </div>
-                <button
-                  onClick={handleClearAllContracts}
-                  className="flex items-center gap-2 px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition whitespace-nowrap"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  ล้างสัญญาทั้งหมด
-                </button>
               </div>
 
-              {/* Clear storage only (MinIO + RAG + GraphRAG, no contract rows) */}
-              <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-100">
-                <div>
-                  <p className="font-medium text-red-900">ล้างพื้นที่จัดเก็บไฟล์</p>
-                  <p className="text-sm text-red-600">ลบไฟล์ทั้งหมดจาก MinIO, RAG, และ GraphRAG (ไม่ลบข้อมูลสัญญาใน DB)</p>
+              {/* ── Option 2: Nuclear Wipe ── */}
+              <div className="p-6">
+                <div className="flex items-start justify-between gap-6">
+                  <div className="flex-1">
+                    <p className="font-semibold text-red-900 text-base mb-1">
+                      ⛔ ลบทุกอย่างถาวร (รวม MinIO + Jobs)
+                    </p>
+                    <p className="text-sm text-red-700 mb-3">
+                      ล้าง DB, ล้าง system contract KB, ล้าง GraphRAG, ลบ Job data ทั้งหมด <strong>และ ลบไฟล์จาก MinIO ด้วย</strong> — ไม่สามารถกู้คืนได้
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { label: 'ลบ DB (Contracts)', icon: '🗄️' },
+                        { label: 'ล้าง System KB', icon: '📚' },
+                        { label: 'ล้าง GraphRAG', icon: '🕸️' },
+                        { label: 'ลบ Jobs ทั้งหมด', icon: '🗑️' },
+                        { label: 'ลบไฟล์ MinIO', icon: '💥', critical: true },
+                      ].map(t => (
+                        <span key={t.label} className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium border ${(t as any).critical
+                          ? 'bg-red-700 text-white border-red-700'
+                          : 'bg-red-100 text-red-700 border-red-200'
+                          }`}>
+                          <span>{t.icon}</span> {t.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleClearAllStorage}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-red-700 text-white text-sm font-semibold rounded-lg hover:bg-red-800 transition whitespace-nowrap shadow-sm flex-shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    ลบทั้งหมด
+                  </button>
                 </div>
-                <button
-                  onClick={handleClearAllStorage}
-                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition whitespace-nowrap"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  ล้างไฟล์ทั้งหมด
-                </button>
               </div>
+
             </div>
           </div>
+
         </div>
       )}
 

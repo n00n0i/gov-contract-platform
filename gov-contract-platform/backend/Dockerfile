@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     libmagic1 \
     curl \
+    antiword \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory

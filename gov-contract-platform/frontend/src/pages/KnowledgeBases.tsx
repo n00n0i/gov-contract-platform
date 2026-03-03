@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Plus, Trash2, Upload, FileText, Database,
   ChevronDown, ChevronUp, Loader2, CheckCircle,
-  AlertCircle, Clock, X, BookOpen, BarChart2, RefreshCw
+  AlertCircle, Clock, X, BookOpen, BarChart2, RefreshCw, Network
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
+import GraphVisualization from '../components/GraphVisualization'
 import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api/v1' })
@@ -56,6 +57,7 @@ interface KnowledgeBase {
   is_indexed: boolean
   owner_user_id: string | null
   created_at: string
+  in_use?: boolean
 }
 
 interface KBDocument {
@@ -74,10 +76,10 @@ interface KBDocument {
 // ── Status badge ─────────────────────────────────────────────────────────────
 function DocStatusBadge({ status }: { status: KBDocument['status'] }) {
   const cfg = {
-    pending:    { icon: Clock,         label: 'รอประมวลผล',    cls: 'bg-yellow-100 text-yellow-700' },
-    processing: { icon: Loader2,       label: 'กำลังประมวลผล', cls: 'bg-blue-100 text-blue-700' },
-    indexed:    { icon: CheckCircle,   label: 'พร้อมใช้งาน',   cls: 'bg-green-100 text-green-700' },
-    error:      { icon: AlertCircle,   label: 'เกิดข้อผิดพลาด', cls: 'bg-red-100 text-red-700' },
+    pending: { icon: Clock, label: 'รอดำเนินการ', cls: 'bg-yellow-100 text-yellow-700' },
+    processing: { icon: Loader2, label: 'กำลังประมวลผล', cls: 'bg-blue-100 text-blue-700' },
+    indexed: { icon: CheckCircle, label: 'พร้อมใช้งาน', cls: 'bg-green-100 text-green-700' },
+    error: { icon: AlertCircle, label: 'เกิดข้อผิดพลาด', cls: 'bg-red-100 text-red-700' },
   }[status] ?? { icon: Clock, label: status, cls: 'bg-gray-100 text-gray-700' }
   const Icon = cfg.icon
   return (
@@ -187,7 +189,7 @@ function StatsPanel({ kb, onClose }: { kb: KnowledgeBase; onClose: () => void })
   useEffect(() => {
     api.get(`/knowledge-bases/${kb.id}/stats`)
       .then(r => setStats(r.data.data))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false))
   }, [kb.id])
 
@@ -206,8 +208,8 @@ function StatsPanel({ kb, onClose }: { kb: KnowledgeBase; onClose: () => void })
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { label: 'เอกสารทั้งหมด', value: stats.document_count },
-                  { label: 'Chunks (Vector)', value: stats.total_chunks },
-                  { label: 'Entities (GraphRAG)', value: stats.neo4j_entities },
+                  { label: 'Vector Chunks (RAG)', value: stats.total_chunks },
+                  { label: 'Graph Entities (GraphRAG)', value: stats.neo4j_entities },
                 ].map(s => (
                   <div key={s.label} className="bg-gray-50 rounded-lg p-3 text-center">
                     <div className="text-2xl font-bold text-blue-600">{s.value ?? 0}</div>
@@ -243,6 +245,28 @@ function StatsPanel({ kb, onClose }: { kb: KnowledgeBase; onClose: () => void })
   )
 }
 
+// ── KB Graph Modal ────────────────────────────────────────────────────────────
+function KBGraphModal({ kb, onClose }: { kb: KnowledgeBase; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '90vh' }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Network size={18} className="text-blue-600" />
+            <h2 className="font-semibold text-gray-900">GraphRAG: {kb.name}</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-hidden p-4">
+          <GraphVisualization mode="kb" kbId={kb.id} height={580} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── KB Row (expanded documents) ──────────────────────────────────────────────
 function KBRow({
   kb, onDelete, onShowStats, toast
@@ -257,6 +281,7 @@ function KBRow({
   const [docsLoading, setDocsLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [deleteDocId, setDeleteDocId] = useState<string | null>(null)
+  const [showGraph, setShowGraph] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -353,6 +378,9 @@ function KBRow({
 
   return (
     <>
+      {/* KB Graph Modal */}
+      {showGraph && <KBGraphModal kb={kb} onClose={() => setShowGraph(false)} />}
+
       {/* Confirm delete doc dialog */}
       {deleteDocId && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -409,9 +437,22 @@ function KBRow({
             </button>
             {!kb.is_system && (
               <button
-                onClick={() => onDelete(kb.id)}
-                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                title="ลบ KB"
+                onClick={() => setShowGraph(true)}
+                className="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                title="แสดง GraphRAG"
+              >
+                <Network size={16} />
+              </button>
+            )}
+            {!kb.is_system && (
+              <button
+                onClick={() => !kb.in_use && onDelete(kb.id)}
+                disabled={kb.in_use}
+                className={`p-2 rounded-lg transition-colors ${kb.in_use
+                    ? 'text-gray-200 cursor-not-allowed'
+                    : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
+                  }`}
+                title={kb.in_use ? 'KB นี้ถูกใช้งานโดย Agent — ลบไม่ได้' : 'ลบ KB'}
               >
                 <Trash2 size={16} />
               </button>
@@ -429,6 +470,11 @@ function KBRow({
         {expanded && (
           <div className="border-t border-gray-100 bg-gray-50 px-5 py-4">
             {/* Upload button */}
+            {kb.is_system && (
+              <p className="text-sm font-medium text-gray-700 mb-3">
+                เอกสารสัญญาที่จัดทำดัชนีแล้ว (เพิ่มอัตโนมัติเมื่ออัปโหลดสัญญา)
+              </p>
+            )}
             {!kb.is_system && (
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm font-medium text-gray-700">เอกสารใน KB</p>
@@ -457,7 +503,11 @@ function KBRow({
             ) : docs.length === 0 ? (
               <div className="text-center py-6 text-gray-400">
                 <FileText size={32} className="mx-auto mb-2 opacity-40" />
-                <p className="text-sm">ยังไม่มีเอกสาร — อัปโหลดเพื่อเริ่มต้น</p>
+                <p className="text-sm">
+                  {kb.is_system
+                    ? 'ยังไม่มีเอกสารสัญญา — อัปโหลดสัญญาใหม่เพื่อเพิ่มอัตโนมัติ'
+                    : 'ยังไม่มีเอกสาร — อัปโหลดเพื่อเริ่มต้น'}
+                </p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -482,15 +532,14 @@ function KBRow({
                       </div>
                     </div>
                     <DocStatusBadge status={doc.status} />
-                    {!kb.is_system && (doc.status === 'error' || doc.status === 'processing') && (
-                      <button
-                        onClick={() => handleReprocess(doc.id)}
-                        className="p-1.5 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0"
-                        title="ประมวลผลใหม่"
-                      >
-                        <RefreshCw size={14} />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => handleReprocess(doc.id)}
+                      disabled={doc.status === 'processing' || doc.status === 'pending'}
+                      className="p-1.5 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title="ประมวลผลใหม่ (RAG + GraphRAG)"
+                    >
+                      <RefreshCw size={14} className={doc.status === 'processing' ? 'animate-spin' : ''} />
+                    </button>
                     {!kb.is_system && (
                       <button
                         onClick={() => setDeleteDocId(doc.id)}

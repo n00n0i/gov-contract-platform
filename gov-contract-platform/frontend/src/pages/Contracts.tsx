@@ -179,7 +179,7 @@ export default function Contracts() {
     } catch {}
   }
 
-  const formatCurrency = (v: number) => v ? new Intl.NumberFormat('th-TH').format(v) : '-'
+  const formatCurrency = (v: number) => v ? new Intl.NumberFormat('th-TH').format(v) + ' บาท' : '-'
   const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' }) : '-'
   const getDaysRemaining = (end: string) => Math.ceil((new Date(end).getTime() - Date.now()) / 86400000)
 

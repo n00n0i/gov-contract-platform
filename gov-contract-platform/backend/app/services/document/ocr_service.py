@@ -16,6 +16,62 @@ import io
 import logging
 import re
 from typing import Optional, Dict, Any, List
+
+
+def _is_garbage_line(line: str) -> bool:
+    """Return True if a line looks like OCR garbage (scattered chars, high whitespace)."""
+    if not line.strip():
+        return False
+    total = len(line)
+    if total < 15:
+        return False
+    spaces = line.count(' ') + line.count('\t')
+    space_ratio = spaces / total
+    tokens = line.split()
+    if not tokens:
+        return False
+    avg_token_len = sum(len(t) for t in tokens) / len(tokens)
+    return space_ratio > 0.45 and avg_token_len < 2.5
+
+
+def _clean_ocr_text(text: str) -> str:
+    """Remove model-generated artifacts and garbage scatter lines from OCR output."""
+    lines = text.splitlines()
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'^PageNumber\s*:', stripped, re.IGNORECASE):
+            continue
+        if re.match(r'^Page\s+\d+\s+of\s+\d+\s*$', stripped, re.IGNORECASE):
+            continue
+        if re.match(r'^\[?Page\s+\d+\]?\s*$', stripped, re.IGNORECASE):
+            continue
+        if _is_garbage_line(line):
+            continue
+        cleaned.append(line)
+    result = re.sub(r'\n{3,}', '\n\n', '\n'.join(cleaned))
+    return result.strip()
+def _deduplicate_ocr_pages(pages: list) -> list:
+    """
+    Remove duplicate/near-duplicate pages (LLM OCR sometimes repeats content).
+    Uses word-overlap similarity: if two consecutive pages share >85% words, skip the second.
+    """
+    if not pages:
+        return pages
+    deduped = [pages[0]]
+    for page in pages[1:]:
+        prev = deduped[-1]
+        words_a = set(prev.split())
+        words_b = set(page.split())
+        if not words_a or not words_b:
+            deduped.append(page)
+            continue
+        overlap = len(words_a & words_b) / max(len(words_a | words_b), 1)
+        if overlap < 0.85:          # less than 85% word overlap -> keep
+            deduped.append(page)
+    return deduped
+
+
 from datetime import datetime
 import pytesseract
 from pdf2image import convert_from_bytes
@@ -69,6 +125,8 @@ class OCRService:
             mode = self._settings_service.get_mode() if self._settings_service else "default"
             if mode == "typhoon":
                 return self._process_typhoon(file_data, mime_type)
+            elif mode == "ollama":
+                return self._process_ollama(file_data, mime_type)
             elif mode == "custom":
                 return self._process_custom(file_data, mime_type)
             else:
@@ -175,14 +233,15 @@ class OCRService:
                 response = httpx.post(endpoint, json=payload, headers=headers, timeout=120.0)
                 response.raise_for_status()
                 data = response.json()
-                page_text = data["choices"][0]["message"]["content"]
+                page_text = _clean_ocr_text(data["choices"][0]["message"]["content"])
                 if page_text:
                     all_texts.append(page_text)
             except Exception as e:
                 logger.error(f"Typhoon OCR failed: {e}")
                 return OCRResult(success=False, error=f"Typhoon OCR failed: {e}")
 
-        full_text = "\n\n".join(all_texts)
+        all_texts = _deduplicate_ocr_pages(all_texts)
+        full_text = "\f".join(all_texts)   # \f = form-feed = true page separator
         extracted_data = self._extract_contract_data(full_text) if full_text else {}
         return OCRResult(
             success=True,
@@ -194,9 +253,121 @@ class OCRService:
             extracted_data=extracted_data,
         )
 
+    def _process_ollama(self, file_data: bytes, mime_type: str) -> OCRResult:
+        """Process document via Ollama vision model — all pages, fixed prompt."""
+        import httpx
+        from pdf2image import convert_from_bytes as _convert
+
+        s = self._settings_service.get_settings() if self._settings_service else {}
+        ollama_url = s.get("ollama_url", "").rstrip("/")
+        ollama_key = s.get("ollama_key", "")
+        ollama_model = s.get("ollama_model", "")
+
+        if not ollama_url or not ollama_model:
+            logger.warning("Ollama URL or model not configured, falling back to default")
+            if mime_type == "application/pdf":
+                return self._process_pdf(file_data)
+            return self._process_image(file_data)
+
+        # Ensure we hit the chat completions endpoint
+        base = ollama_url.rstrip("/")
+        if not base.endswith("/chat/completions"):
+            endpoint = f"{base}/v1/chat/completions" if not base.endswith("/v1") else f"{base}/chat/completions"
+        else:
+            endpoint = base
+
+        headers = {"Content-Type": "application/json"}
+        if ollama_key:
+            headers["Authorization"] = f"Bearer {ollama_key}"
+
+        prompt = "Extract all text from this document image. Return only the raw text content, preserving the original layout as much as possible."
+
+        all_texts: List[str] = []
+
+        if mime_type == "application/pdf":
+            try:
+                images = _convert(file_data, dpi=150)
+            except Exception as e:
+                logger.error(f"PDF to image conversion failed: {e}")
+                return OCRResult(success=False, error=f"PDF to image conversion failed: {e}")
+
+            for page_num, img in enumerate(images, start=1):
+                try:
+                    if img.mode != "RGB":
+                        img = img.convert("RGB")
+                    # Compress to max 1600px longest edge
+                    w, h = img.size
+                    if max(w, h) > 1600:
+                        scale = 1600 / max(w, h)
+                        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=80)
+                    img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+                    payload = {
+                        "model": ollama_model,
+                        "messages": [{"role": "user", "content": [
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                            {"type": "text", "text": prompt},
+                        ], "images": [img_b64]}],
+                        "max_tokens": 8192,
+                    }
+                    response = httpx.post(endpoint, json=payload, headers=headers, timeout=180.0)
+                    response.raise_for_status()
+                    data = response.json()
+                    text = _clean_ocr_text(data["choices"][0]["message"]["content"])
+                    if text:
+                        all_texts.append(text)
+                    logger.info(f"Ollama OCR page {page_num}/{len(images)} done ({len(text)} chars)")
+                except Exception as e:
+                    logger.warning(f"Ollama OCR page {page_num} failed (skipping): {e}")
+                    continue
+        elif mime_type.startswith("image/"):
+            try:
+                img = Image.open(io.BytesIO(file_data))
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=80)
+                img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+                payload = {
+                    "model": ollama_model,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                        {"type": "text", "text": prompt},
+                    ], "images": [img_b64]}],
+                    "max_tokens": 8192,
+                }
+                response = httpx.post(endpoint, json=payload, headers=headers, timeout=180.0)
+                response.raise_for_status()
+                data = response.json()
+                text = _clean_ocr_text(data["choices"][0]["message"]["content"])
+                if text:
+                    all_texts.append(text)
+            except Exception as e:
+                logger.error(f"Ollama OCR failed: {e}")
+                return OCRResult(success=False, error=f"Ollama OCR failed: {e}")
+        else:
+            return OCRResult(success=False, error=f"Unsupported file type for Ollama OCR: {mime_type}")
+
+        all_texts = _deduplicate_ocr_pages(all_texts)
+        full_text = "\f".join(all_texts)   # \f = form-feed = true page separator
+        extracted_data = self._extract_contract_data(full_text) if full_text else {}
+        return OCRResult(
+            success=True,
+            text=full_text,
+            confidence=0.85,
+            ocr_engine="ollama",
+            pages=len(all_texts),
+            language=self.language,
+            extracted_data=extracted_data,
+        )
+
     def _process_custom(self, file_data: bytes, mime_type: str) -> OCRResult:
         """
         Process document via custom OpenAI-compatible API with vision.
+        Converts PDFs to images page-by-page (same as _process_ollama).
         """
         import httpx
 
@@ -204,6 +375,8 @@ class OCRService:
         custom_url = s.get("custom_api_url", "").rstrip("/")
         custom_key = s.get("custom_api_key", "")
         custom_model = s.get("custom_api_model", "")
+        prompt = s.get("ocr_template", "").strip() or \
+            "Extract all text from this document image. Return only the raw text content."
 
         if not custom_url or not custom_model:
             logger.warning("Custom OCR API URL or model not configured, falling back to default")
@@ -211,54 +384,93 @@ class OCRService:
                 return self._process_pdf(file_data)
             return self._process_image(file_data)
 
-        file_b64 = base64.b64encode(file_data).decode("utf-8")
+        # Ensure /v1/chat/completions
+        base = custom_url.rstrip("/")
+        endpoint = f"{base}/v1/chat/completions" if not base.endswith("/chat/completions") else base
+
         headers = {"Content-Type": "application/json"}
         if custom_key:
             headers["Authorization"] = f"Bearer {custom_key}"
 
-        payload = {
-            "model": custom_model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime_type};base64,{file_b64}"},
-                        },
-                        {
-                            "type": "text",
-                            "text": "Extract all text from this document. Return only the raw text content.",
-                        },
-                    ],
-                }
-            ],
-            "max_tokens": 8192,
-        }
+        all_texts: List[str] = []
 
-        try:
-            response = httpx.post(
-                f"{custom_url}/v1/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=120.0,
-            )
-            response.raise_for_status()
-            data = response.json()
-            text = data["choices"][0]["message"]["content"]
-            extracted_data = self._extract_contract_data(text) if text else {}
-            return OCRResult(
-                success=True,
-                text=text,
-                confidence=0.85,
-                ocr_engine="custom",
-                language=self.language,
-                extracted_data=extracted_data,
-            )
-        except Exception as e:
-            logger.error(f"Custom OCR API failed: {e}")
-            return OCRResult(success=False, error=f"Custom OCR API failed: {e}")
-    
+        if mime_type == "application/pdf":
+            try:
+                images = convert_from_bytes(file_data, dpi=150)
+            except Exception as e:
+                logger.error(f"PDF to image conversion failed: {e}")
+                return OCRResult(success=False, error=f"PDF to image conversion failed: {e}")
+
+            for page_num, img in enumerate(images, start=1):
+                try:
+                    if img.mode != "RGB":
+                        img = img.convert("RGB")
+                    w, h = img.size
+                    if max(w, h) > 1600:
+                        scale = 1600 / max(w, h)
+                        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=80)
+                    img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+                    payload = {
+                        "model": custom_model,
+                        "messages": [{"role": "user", "content": [
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                            {"type": "text", "text": prompt},
+                        ], "images": [img_b64]}],
+                        "max_tokens": 8192,
+                    }
+                    response = httpx.post(endpoint, json=payload, headers=headers, timeout=180.0)
+                    response.raise_for_status()
+                    data = response.json()
+                    text = _clean_ocr_text(data["choices"][0]["message"]["content"])
+                    if text:
+                        all_texts.append(text)
+                    logger.info(f"Custom OCR page {page_num}/{len(images)} done ({len(text)} chars)")
+                except Exception as e:
+                    logger.warning(f"Custom OCR page {page_num} failed (skipping): {e}")
+                    continue
+        elif mime_type.startswith("image/"):
+            try:
+                img = Image.open(io.BytesIO(file_data))
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=80)
+                img_b64 = base64.b64encode(buf.getvalue()).decode()
+                payload = {
+                    "model": custom_model,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                        {"type": "text", "text": prompt},
+                    ], "images": [img_b64]}],
+                    "max_tokens": 8192,
+                }
+                response = httpx.post(endpoint, json=payload, headers=headers, timeout=120.0)
+                response.raise_for_status()
+                data = response.json()
+                text = _clean_ocr_text(data["choices"][0]["message"]["content"])
+                if text:
+                    all_texts.append(text)
+            except Exception as e:
+                logger.error(f"Custom OCR failed: {e}")
+                return OCRResult(success=False, error=f"Custom OCR failed: {e}")
+        else:
+            return OCRResult(success=False, error=f"Unsupported file type for Custom OCR: {mime_type}")
+
+        all_texts = _deduplicate_ocr_pages(all_texts)
+        full_text = "\f".join(all_texts)   # \f = form-feed = true page separator
+        extracted_data = self._extract_contract_data(full_text) if full_text else {}
+        return OCRResult(
+            success=True,
+            text=full_text,
+            confidence=0.85,
+            ocr_engine="custom",
+            language=self.language,
+            extracted_data=extracted_data,
+        )
+
     def _process_pdf(self, file_data: bytes) -> OCRResult:
         """Process PDF file"""
         text_parts = []
@@ -273,7 +485,7 @@ class OCRService:
                         text_parts.append(page_text)
 
                 if text_parts:
-                    full_text = "\n\n".join(text_parts)
+                    full_text = "\f".join(text_parts)   # \f = form-feed = true page separator
                     extracted_data = self._extract_contract_data(full_text)
 
                     return OCRResult(
@@ -305,7 +517,7 @@ class OCRService:
                 if confidences:
                     confidence_scores.append(sum(confidences) / len(confidences))
 
-            full_text = "\n\n".join(text_parts)
+            full_text = "\f".join(text_parts)   # \f = form-feed = true page separator
             avg_confidence = sum(confidence_scores) / len(confidence_scores) / 100 if confidence_scores else 0.7
 
             extracted_data = self._extract_contract_data(full_text)

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  FileText, Upload, CheckCircle, Search, Building2, Calendar, DollarSign,
+  FileText, Upload, CheckCircle, Search, Calendar, DollarSign,
   AlertCircle, ChevronRight, X, Home, ChevronDown, Brain, Loader2, Eye,
-  EyeOff, Save, FileCheck, Sparkles, Edit3, Hash, User, Briefcase,
-  FilePlus, FolderOpen, ScanText,
+  FileCheck, Edit3, Hash, User,
+  FilePlus, FolderOpen, ScanText, Settings2,
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
@@ -25,6 +25,7 @@ interface Contract {
   description?: string
   budget_year?: number
   department_name?: string
+  documents?: { id: string; filename: string; document_type: string; created_at: string }[]
 }
 
 interface LLMProvider {
@@ -35,15 +36,29 @@ interface LLMProvider {
   model?: string
 }
 
-interface ExtractedData {
-  contract_number: string
-  title: string
-  counterparty: string
-  contract_type: string
-  contract_value: string
-  project_name: string
-  start_date: string
-  end_date: string
+interface DocumentJob {
+  id: string
+  filename: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  contract_id: string | null
+  contract_title: string | null
+  document_type: string
+  is_draft: boolean
+  is_main_document: boolean
+  page_count: number | null
+  ocr_engine: string | null
+  ocr_error: string | null
+  llm_error: string | null
+  extracted_text?: string
+  extracted_data?: Record<string, unknown>
+  created_at: string | null
+  completed_at: string | null
+}
+
+interface OCROption {
+  mode: string
+  label: string
+  detail: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -77,7 +92,8 @@ const DEFAULT_PROMPT =
   '  "contract_value": 0.0,\n' +
   '  "project_name": "ชื่อโครงการ",\n' +
   '  "start_date": "YYYY-MM-DD หรือ null",\n' +
-  '  "end_date": "YYYY-MM-DD หรือ null"\n' +
+  '  "end_date": "YYYY-MM-DD หรือ null",\n' +
+  '  "summary": "สรุปเนื้อหาสำคัญของสัญญา 3-5 ประโยค"\n' +
   '}\n\nข้อความ OCR:'
 
 const ALLOWED_TYPES = [
@@ -97,28 +113,29 @@ api.interceptors.request.use((config) => {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(v: number) {
-  return new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', minimumFractionDigits: 0 }).format(v)
+  return new Intl.NumberFormat('th-TH').format(v) + ' บาท'
 }
 function fmtDate(d?: string) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('th-TH')
 }
 function statusBadge(s: string) {
-  const cls: Record<string, string> = {
-    active: 'bg-green-100 text-green-700',
-    draft: 'bg-gray-100 text-gray-600',
-    expired: 'bg-red-100 text-red-700',
-    terminated: 'bg-orange-100 text-orange-700',
+  const config: Record<string, { cls: string; label: string }> = {
+    active: { cls: 'bg-green-100 text-green-700', label: 'ดำเนินการ' },
+    on_hold: { cls: 'bg-purple-100 text-purple-700', label: 'พักการดำเนินการ' },
+    completed: { cls: 'bg-blue-100 text-blue-700', label: 'เสร็จสิ้น' },
+    draft: { cls: 'bg-gray-100 text-gray-600', label: 'ร่าง' },
+    expired: { cls: 'bg-red-100 text-red-700', label: 'หมดอายุ' },
+    terminated: { cls: 'bg-orange-100 text-orange-700', label: 'ยกเลิก' },
   }
-  const label: Record<string, string> = {
-    active: 'ใช้งาน', draft: 'ร่าง', expired: 'หมดอายุ', terminated: 'ยกเลิก',
-  }
+  const c = config[s] || { cls: 'bg-gray-100 text-gray-600', label: s }
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls[s] || 'bg-gray-100 text-gray-600'}`}>
-      {label[s] || s}
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.cls}`}>
+      {c.label}
     </span>
   )
 }
+
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -126,52 +143,41 @@ export default function DocumentUpload() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const preselectedId = searchParams.get('contract_id')
+  const reviewMode = searchParams.get('review') === '1'
 
   // ── Flow
   const [step, setStep] = useState<'choose' | 'upload' | 'review'>('choose')
   const [uploadMode, setUploadMode] = useState<'main' | 'attach' | null>(null)
 
-  // ── Step 1 – Mode A: LLM config
+  // ── Step 1 – OCR config
+  const [ocrOptions, setOcrOptions] = useState<OCROption[]>([
+    { mode: 'default', label: 'Tesseract / pdfplumber', detail: 'โหมดเริ่มต้น (ไม่ต้อง API)' },
+  ])
+  const [selectedOcrMode, setSelectedOcrMode] = useState('default')
+
+  // ── Step 1 – LLM config
   const [llmProviders, setLLMProviders] = useState<LLMProvider[]>([])
   const [selectedLLMId, setSelectedLLMId] = useState('')
   const [extractionPrompt, setExtractionPrompt] = useState(DEFAULT_PROMPT)
   const [showPromptEditor, setShowPromptEditor] = useState(false)
 
-  // ── Step 1 – Mode B: contract selection
+  // ── Step 1 – contract selection
   const [contracts, setContracts] = useState<Contract[]>([])
   const [loadingContracts, setLoadingContracts] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null)
   const [expandedContractId, setExpandedContractId] = useState<string | null>(null)
 
-  // ── Step 2 – upload
+  // ── Step 2 – upload & job tracking
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [selectedDocType, setSelectedDocType] = useState('amendment')
   const [isDraft, setIsDraft] = useState(false)
-  const [processing, setProcessing] = useState(false)
-  const [processingPhase, setProcessingPhase] = useState<'ocr' | 'llm' | null>(null)
+  const [uploading, setUploading] = useState(false)
   const [ocrEngineName, setOcrEngineName] = useState('Tesseract / pdfplumber')
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const phaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ── Step 3 – review
-  const [storagePath, setStoragePath] = useState('')
-  const [storageBucket, setStorageBucket] = useState('govplatform')
-  const [fileSize, setFileSize] = useState(0)
-  const [mimeType, setMimeType] = useState('application/pdf')
-  const [ocrEngine, setOcrEngine] = useState('')
-  const [rawOcrText, setRawOcrText] = useState('')
-  const [showRawText, setShowRawText] = useState(false)
-  const [ocrError, setOcrError] = useState<string | null>(null)
-  const [llmError, setLlmError] = useState<string | null>(null)
-  const [editData, setEditData] = useState<ExtractedData>({
-    contract_number: '', title: '', counterparty: '',
-    contract_type: '', contract_value: '', project_name: '',
-    start_date: '', end_date: '',
-  })
-  const [saving, setSaving] = useState(false)
-  const [savedDocId, setSavedDocId] = useState<string | null>(null)
+  const [uploadDone, setUploadDone] = useState(false)
 
   // ── Effects
   useEffect(() => {
@@ -180,7 +186,7 @@ export default function DocumentUpload() {
   }, [])
 
   useEffect(() => {
-    if (uploadMode === 'attach' && contracts.length === 0) loadContracts()
+    if (uploadMode === 'attach') loadContracts()
   }, [uploadMode])
 
   useEffect(() => {
@@ -200,15 +206,21 @@ export default function DocumentUpload() {
         })
         setStep('upload')
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [preselectedId])
+
+
 
   // ── Data loaders
   const loadContracts = async () => {
     setLoadingContracts(true)
     try {
-      const r = await api.get('/contracts?page_size=200')
-      setContracts(r.data.items || [])
+      const r = await api.get('/contracts?limit=100')
+      const items = r.data.items || r.data.data?.items || r.data.data || []
+      setContracts(items)
+    } catch (err) {
+      console.error('Failed to load contracts:', err)
+      setContracts([])
     } finally {
       setLoadingContracts(false)
     }
@@ -221,11 +233,12 @@ export default function DocumentUpload() {
         (p: LLMProvider) => p.modelType === 'llm'
       )
       setLLMProviders(providers)
-      // Prefer the activeLLMId if available
       const activeId = r.data.data?.activeLLMId
       const match = providers.find(p => p.id === activeId)
       setSelectedLLMId(match ? match.id : providers[0]?.id || '')
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('Failed to load LLM providers:', err)
+    }
   }
 
   const loadOCRSettings = async () => {
@@ -233,24 +246,55 @@ export default function DocumentUpload() {
       const r = await api.get('/settings/ocr')
       const s = r.data.data || {}
       const mode = s.mode || 'default'
-      if (mode === 'typhoon') {
-        setOcrEngineName(`Typhoon OCR (${s.typhoon_model || 'typhoon-ocr'})`)
-      } else if (mode === 'custom') {
-        setOcrEngineName(`Custom API (${s.custom_api_model || 'vision model'})`)
-      } else {
-        setOcrEngineName('Tesseract / pdfplumber')
+      // Build OCR model options list
+      const opts: OCROption[] = [
+        { mode: 'default', label: 'Tesseract / pdfplumber', detail: 'โหมดเริ่มต้น (ไม่ต้อง API)' },
+      ]
+      if (s.typhoon_key) {
+        opts.push({ mode: 'typhoon', label: `Typhoon OCR (${s.typhoon_model || 'typhoon-ocr'})`, detail: 'Cloud OCR สำหรับภาษาไทย' })
       }
+      if (s.ollama_url) {
+        opts.push({ mode: 'ollama', label: `Ollama (${s.ollama_model || 'vision model'})`, detail: 'Local vision model' })
+      }
+      if (s.custom_api_url) {
+        opts.push({ mode: 'custom', label: `Custom API (${s.custom_api_model || 'vision model'})`, detail: s.custom_api_url })
+      }
+      setOcrOptions(opts)
+      setSelectedOcrMode(mode)
+      // Set engine name display
+      const matched = opts.find(o => o.mode === mode)
+      setOcrEngineName(matched?.label || 'Tesseract / pdfplumber')
     } catch { /* ignore */ }
   }
 
   const loadContractDetail = async (id: string) => {
     try {
       const r = await api.get(`/contracts/${id}`)
-      const c = r.data.data
+      const c = r.data.data || r.data
+
+      let documents: any[] = []
+      try {
+        const docRes = await api.get(`/documents?contract_id=${id}`)
+        const allDocs = docRes.data.data?.items || docRes.data.items || docRes.data || []
+        documents = allDocs.filter((d: any) =>
+          d.contract_id === id || d.contractId === id || (d.contract && d.contract.id === id)
+        )
+      } catch { documents = [] }
+
       setContracts(prev => prev.map(p =>
-        p.id === id ? { ...p, description: c.description, contract_type: c.contract_type, project_name: c.project_name, budget_year: c.budget_year, department_name: c.department_name } : p
+        p.id === id ? {
+          ...p,
+          description: c.description,
+          contract_type: c.contract_type,
+          project_name: c.project_name,
+          budget_year: c.budget_year,
+          department_name: c.department_name,
+          documents,
+        } : p
       ))
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('Failed to load contract detail:', err)
+    }
   }
 
   // ── Step 1 handlers
@@ -281,136 +325,53 @@ export default function DocumentUpload() {
     setSelectedFile(f)
   }
 
-  const handleProcessFile = async () => {
+  const handleUploadJob = async () => {
     if (!selectedFile) return
-    setProcessing(true)
-    setProcessingPhase('ocr')
-
-    // Switch to LLM phase after ~8s (OCR typically takes 5-15s)
-    phaseTimerRef.current = setTimeout(() => setProcessingPhase('llm'), 8000)
-
+    setUploading(true)
     try {
       const fd = new FormData()
       fd.append('file', selectedFile)
+      if (selectedContract?.id) fd.append('contract_id', selectedContract.id)
+      fd.append('document_type', uploadMode === 'main' ? 'contract' : selectedDocType)
+      fd.append('is_draft', String(isDraft))
+      fd.append('is_main_document', String(uploadMode === 'main' ? true : !isDraft))
       if (selectedLLMId) fd.append('llm_provider_id', selectedLLMId)
-      fd.append('extraction_prompt', extractionPrompt)
-
-      const r = await api.post('/documents/ocr-preview', fd, {
+      if (extractionPrompt && extractionPrompt !== DEFAULT_PROMPT) {
+        fd.append('extraction_prompt', extractionPrompt)
+      }
+      await api.post('/documents/jobs', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      const d = r.data.data
-      setStoragePath(d.storage_path)
-      setStorageBucket(d.storage_bucket)
-      setFileSize(d.file_size)
-      setMimeType(d.mime_type)
-      setOcrEngine(d.ocr_engine || 'unknown')
-      setRawOcrText(d.extracted_text || '')
-      setOcrError(d.ocr_error || null)
-      setLlmError(d.llm_error || null)
-
-      const ext = d.extracted_data || {}
-      setEditData({
-        contract_number: ext.contract_number || selectedContract?.contract_number || '',
-        title: ext.title || selectedContract?.title || '',
-        counterparty: ext.counterparty || selectedContract?.vendor_name || '',
-        contract_type: ext.contract_type || selectedContract?.contract_type || '',
-        contract_value: ext.contract_value ? String(ext.contract_value) : selectedContract?.value ? String(selectedContract.value) : '',
-        project_name: ext.project_name || selectedContract?.project_name || '',
-        start_date: ext.start_date || selectedContract?.start_date || '',
-        end_date: ext.end_date || selectedContract?.end_date || '',
-      })
-      setStep('review')
+      // Upload done — reset file, show success flash
+      setSelectedFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      setUploadDone(true)
+      setTimeout(() => setUploadDone(false), 6000)
     } catch (e: any) {
-      alert(e.response?.data?.detail || 'เกิดข้อผิดพลาด กรุณาลองใหม่')
+      alert(e.response?.data?.detail || 'อัพโหลดไม่สำเร็จ กรุณาลองใหม่')
     } finally {
-      if (phaseTimerRef.current) clearTimeout(phaseTimerRef.current)
-      setProcessing(false)
-      setProcessingPhase(null)
+      setUploading(false)
     }
-  }
-
-  // ── Step 3 handler
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      let contractId: string | null = null
-
-      if (uploadMode === 'main') {
-        const r = await api.post('/contracts', {
-          title: editData.title || 'สัญญาใหม่',
-          contract_no: editData.contract_number || undefined,
-          vendor_name: editData.counterparty || undefined,
-          contract_type: editData.contract_type || 'procurement',
-          value: parseFloat(editData.contract_value) || 0,
-          start_date: editData.start_date || undefined,
-          end_date: editData.end_date || undefined,
-          project_name: editData.project_name || undefined,
-          status: 'active',
-        })
-        contractId = r.data.data.id
-      } else {
-        contractId = selectedContract?.id || null
-      }
-
-      const r = await api.post('/documents/confirm', {
-        storage_path: storagePath,
-        storage_bucket: storageBucket,
-        filename: selectedFile?.name || 'document',
-        file_size: fileSize,
-        mime_type: mimeType,
-        contract_id: contractId || undefined,
-        document_type: uploadMode === 'main' ? 'contract' : selectedDocType,
-        is_draft: isDraft,
-        is_main_document: uploadMode === 'main' ? true : !isDraft,
-        extracted_text: rawOcrText,
-        extracted_data: {
-          contract_number: editData.contract_number || undefined,
-          title: editData.title || undefined,
-          counterparty: editData.counterparty || undefined,
-          contract_type: editData.contract_type || undefined,
-          contract_value: editData.contract_value ? parseFloat(editData.contract_value) : undefined,
-          project_name: editData.project_name || undefined,
-          start_date: editData.start_date || undefined,
-          end_date: editData.end_date || undefined,
-        },
-      })
-      setSavedDocId(r.data.data.id)
-    } catch (e: any) {
-      alert(e.response?.data?.detail || 'บันทึกไม่สำเร็จ กรุณาลองใหม่')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleReset = () => {
-    setStep('choose')
-    setUploadMode(null)
-    setSelectedContract(null)
-    setSelectedFile(null)
-    setStoragePath('')
-    setEditData({ contract_number: '', title: '', counterparty: '', contract_type: '', contract_value: '', project_name: '', start_date: '', end_date: '' })
-    setRawOcrText('')
-    setOcrError(null)
-    setLlmError(null)
-    setSavedDocId(null)
-    setSearchQuery('')
-    setSelectedDocType('amendment')
-    setIsDraft(false)
   }
 
   // ── Computed
-  const filtered = contracts.filter(c =>
-    (c.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (c.contract_number || '').includes(searchQuery) ||
-    (c.vendor_name || '').toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filtered = contracts.filter(c => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return true
+    return (
+      (c.title || '').toLowerCase().includes(query) ||
+      (c.contract_number || '').toLowerCase().includes(query) ||
+      (c.vendor_name || '').toLowerCase().includes(query) ||
+      (c.contract_type || '').toLowerCase().includes(query) ||
+      (c.project_name || '').toLowerCase().includes(query)
+    )
+  })
 
   const canProceedStep1 = uploadMode === 'main' || (uploadMode === 'attach' && !!selectedContract)
 
   const progressSteps = [
     { key: 'choose', label: 'เลือกประเภท', done: canProceedStep1 && step !== 'choose' },
-    { key: 'upload', label: 'อัพโหลด & ประมวลผล', done: !!storagePath },
-    { key: 'review', label: 'ตรวจสอบ & บันทึก', done: !!savedDocId },
+    { key: 'upload', label: 'อัพโหลด & ประมวลผล', done: false },
   ]
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -444,92 +405,88 @@ export default function DocumentUpload() {
         </div>
 
         {/* ──────────────────────────────────────────────────────
-            STEP 1: CHOOSE MODE
+            STEP 1: CHOOSE MODE + CONFIG + FILE SELECT
         ────────────────────────────────────────────────────── */}
         {step === 'choose' && (
           <div className="space-y-5">
             <div className="text-center mb-2">
               <h2 className="text-xl font-bold text-gray-900">เลือกประเภทการอัพโหลด</h2>
-              <p className="text-sm text-gray-500 mt-1">กรุณาเลือกว่าต้องการอัพโหลดสัญญาใหม่ หรือเพิ่มเอกสารในสัญญาที่มีอยู่</p>
+              <p className="text-sm text-gray-500 mt-1">ตั้งค่า OCR · AI · เลือกไฟล์ และอัพโหลดได้ในหน้าเดียว</p>
             </div>
 
             {/* Mode cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Card A: Main contract */}
               <button
                 onClick={() => handleSelectMode('main')}
-                className={`p-6 rounded-xl border-2 text-left transition-all hover:shadow-md ${
-                  uploadMode === 'main'
-                    ? 'border-blue-500 bg-blue-50 shadow-md'
-                    : 'border-gray-200 bg-white hover:border-blue-300'
-                }`}
+                className={`p-6 rounded-xl border-2 text-left transition-all hover:shadow-md ${uploadMode === 'main' ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-gray-200 bg-white hover:border-blue-300'
+                  }`}
               >
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${
-                  uploadMode === 'main' ? 'bg-blue-100' : 'bg-gray-100'
-                }`}>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${uploadMode === 'main' ? 'bg-blue-100' : 'bg-gray-100'}`}>
                   <FilePlus className={`w-6 h-6 ${uploadMode === 'main' ? 'text-blue-600' : 'text-gray-500'}`} />
                 </div>
-                <h3 className={`font-bold text-lg mb-2 ${uploadMode === 'main' ? 'text-blue-900' : 'text-gray-900'}`}>
-                  อัพโหลดสัญญาหลักใหม่
-                </h3>
-                <p className="text-sm text-gray-500 leading-relaxed">
-                  อัพโหลดไฟล์สัญญา — AI จะถอดข้อมูลสำคัญจากเอกสารโดยอัตโนมัติ และสร้างรายการสัญญาใหม่ในระบบ
-                </p>
-                <div className="mt-4 flex items-center gap-2">
-                  <Brain className="w-4 h-4 text-purple-500" />
-                  <span className="text-xs text-purple-600 font-medium">ต้องการ AI Model สำหรับถอดข้อมูล</span>
-                </div>
+                <h3 className={`font-bold text-lg mb-2 ${uploadMode === 'main' ? 'text-blue-900' : 'text-gray-900'}`}>สัญญาหลักใหม่</h3>
+                <p className="text-sm text-gray-500">สร้างรายการสัญญาใหม่ — AI จะถอดข้อมูลสำคัญอัตโนมัติ</p>
                 {uploadMode === 'main' && (
                   <div className="mt-3 flex items-center gap-1 text-blue-600">
-                    <CheckCircle className="w-4 h-4" />
-                    <span className="text-xs font-medium">เลือกแล้ว</span>
+                    <CheckCircle className="w-4 h-4" /><span className="text-xs font-medium">เลือกแล้ว</span>
                   </div>
                 )}
               </button>
 
-              {/* Card B: Attach to existing */}
               <button
                 onClick={() => handleSelectMode('attach')}
-                className={`p-6 rounded-xl border-2 text-left transition-all hover:shadow-md ${
-                  uploadMode === 'attach'
-                    ? 'border-green-500 bg-green-50 shadow-md'
-                    : 'border-gray-200 bg-white hover:border-green-300'
-                }`}
+                className={`p-6 rounded-xl border-2 text-left transition-all hover:shadow-md ${uploadMode === 'attach' ? 'border-green-500 bg-green-50 shadow-md' : 'border-gray-200 bg-white hover:border-green-300'
+                  }`}
               >
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${
-                  uploadMode === 'attach' ? 'bg-green-100' : 'bg-gray-100'
-                }`}>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${uploadMode === 'attach' ? 'bg-green-100' : 'bg-gray-100'}`}>
                   <FolderOpen className={`w-6 h-6 ${uploadMode === 'attach' ? 'text-green-600' : 'text-gray-500'}`} />
                 </div>
-                <h3 className={`font-bold text-lg mb-2 ${uploadMode === 'attach' ? 'text-green-900' : 'text-gray-900'}`}>
-                  เพิ่มเอกสารในสัญญาที่มีอยู่
-                </h3>
-                <p className="text-sm text-gray-500 leading-relaxed">
-                  เลือกสัญญาที่มีอยู่แล้วในระบบ และแนบเอกสารเพิ่มเติม เช่น ใบแจ้งหนี้ ใบส่งมอบ หรือสัญญาแก้ไข
-                </p>
-                <div className="mt-4 flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-green-500" />
-                  <span className="text-xs text-green-600 font-medium">เลือกสัญญาก่อนอัพโหลด</span>
-                </div>
+                <h3 className={`font-bold text-lg mb-2 ${uploadMode === 'attach' ? 'text-green-900' : 'text-gray-900'}`}>แนบสัญญาที่มีอยู่</h3>
+                <p className="text-sm text-gray-500">เลือกสัญญาแล้วแบบเอกสารเพิ่มเติม เช่น ใบส่งมอบ สัญญาแก้ไข</p>
                 {uploadMode === 'attach' && (
                   <div className="mt-3 flex items-center gap-1 text-green-600">
-                    <CheckCircle className="w-4 h-4" />
-                    <span className="text-xs font-medium">เลือกแล้ว</span>
+                    <CheckCircle className="w-4 h-4" /><span className="text-xs font-medium">เลือกแล้ว</span>
                   </div>
                 )}
               </button>
             </div>
 
-            {/* Mode A: LLM config panel */}
-            {uploadMode === 'main' && (
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <Brain className="w-5 h-5 text-purple-600" />
-                  <h3 className="font-semibold text-gray-900">ตั้งค่า AI สกัดข้อมูล</h3>
+            {/* AI Config Panel – visible for both modes once selected */}
+            {uploadMode && (
+              <div className="bg-white rounded-xl shadow-sm border p-6 space-y-5">
+                <div className="flex items-center gap-2 mb-1">
+                  <Settings2 className="w-5 h-5 text-indigo-600" />
+                  <h3 className="font-semibold text-gray-900">ตั้งค่า AI</h3>
                 </div>
 
-                <div className="mb-5">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">AI Model</label>
+                {/* OCR Model */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <ScanText className="w-4 h-4 inline mr-1 text-indigo-500" />
+                    OCR Model
+                  </label>
+                  <select
+                    value={selectedOcrMode}
+                    onChange={e => {
+                      setSelectedOcrMode(e.target.value)
+                      const o = ocrOptions.find(x => x.mode === e.target.value)
+                      setOcrEngineName(o?.label || 'Tesseract / pdfplumber')
+                    }}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {ocrOptions.map(o => (
+                      <option key={o.mode} value={o.mode}>{o.label} — {o.detail}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">เปลี่ยนโมดเพิ่มเติมได้ใน <a href="/settings?tab=ocr" className="underline text-indigo-600">ตั้งค่า OCR</a></p>
+                </div>
+
+                {/* LLM Model */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Brain className="w-4 h-4 inline mr-1 text-purple-500" />
+                    LLM Model (สกัดข้อมูลสัญญา)
+                  </label>
                   {llmProviders.length === 0 ? (
                     <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
                       <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -542,17 +499,16 @@ export default function DocumentUpload() {
                       className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500"
                     >
                       {llmProviders.map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}{p.model ? ` (${p.model})` : ''}
-                        </option>
+                        <option key={p.id} value={p.id}>{p.name}{p.model ? ` (${p.model})` : ''}</option>
                       ))}
                     </select>
                   )}
                 </div>
 
+                {/* System Prompt */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-medium text-gray-700">System Prompt</label>
+                    <label className="text-sm font-medium text-gray-700">System Prompt (LLM)</label>
                     <button
                       onClick={() => setShowPromptEditor(p => !p)}
                       className="text-xs text-purple-600 hover:underline flex items-center gap-1"
@@ -566,7 +522,7 @@ export default function DocumentUpload() {
                       <textarea
                         value={extractionPrompt}
                         onChange={e => setExtractionPrompt(e.target.value)}
-                        rows={8}
+                        rows={12}
                         className="w-full border rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-purple-500 resize-y"
                       />
                       <button
@@ -585,7 +541,7 @@ export default function DocumentUpload() {
               </div>
             )}
 
-            {/* Mode B: Contract selector */}
+            {/* Contract selector (attach mode) */}
             {uploadMode === 'attach' && (
               <div className="bg-white rounded-xl shadow-sm border p-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -593,7 +549,6 @@ export default function DocumentUpload() {
                   <h3 className="font-semibold text-gray-900">เลือกสัญญา</h3>
                 </div>
 
-                {/* Selected contract badge */}
                 {selectedContract && (
                   <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -631,11 +586,24 @@ export default function DocumentUpload() {
                       <p className="text-sm text-gray-400">กำลังโหลด...</p>
                     </div>
                   ) : filtered.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      <FileText className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                      <p className="text-sm">ไม่พบสัญญา</p>
-                      {searchQuery && (
-                        <button onClick={() => setSearchQuery('')} className="text-xs text-blue-600 hover:underline mt-1">ล้างการค้นหา</button>
+                    <div className="text-center py-10 px-4">
+                      {searchQuery.trim() ? (
+                        <>
+                          <div className="w-14 h-14 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                            <Search className="w-7 h-7 text-amber-400" />
+                          </div>
+                          <p className="text-gray-600 font-medium text-sm">ไม่พบสัญญาที่ตรงกับ "{searchQuery.trim()}"</p>
+                          <button onClick={() => setSearchQuery('')} className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 mt-3">
+                            <X className="w-3.5 h-3.5" />ล้างการค้นหา
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                            <FolderOpen className="w-7 h-7 text-gray-400" />
+                          </div>
+                          <p className="text-gray-500 text-sm">ยังไม่มีสัญญาในระบบ</p>
+                        </>
                       )}
                     </div>
                   ) : filtered.map(c => {
@@ -668,25 +636,47 @@ export default function DocumentUpload() {
                             >
                               <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                             </button>
-                            {isSelected
-                              ? <CheckCircle className="w-4 h-4 text-green-500" />
-                              : <ChevronRight className="w-4 h-4 text-gray-300" />
-                            }
+                            {isSelected ? <CheckCircle className="w-4 h-4 text-green-500" /> : <ChevronRight className="w-4 h-4 text-gray-300" />}
                           </div>
                         </div>
                         {isExpanded && (
-                          <div className="px-4 pb-3 pt-1 bg-gray-50 border-t text-xs text-gray-600">
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                              {c.project_name && <div><span className="text-gray-400">โครงการ:</span> {c.project_name}</div>}
-                              {c.budget_year && <div><span className="text-gray-400">ปีงบ:</span> {c.budget_year}</div>}
-                              {(c.start_date || c.end_date) && (
-                                <div className="col-span-2"><span className="text-gray-400">ระยะเวลา:</span> {fmtDate(c.start_date)} – {fmtDate(c.end_date)}</div>
+                          <div className="px-4 pb-3 pt-3 bg-gray-50 border-t">
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs mb-4">
+                              <div>
+                                <span className="text-gray-400 block mb-0.5">เลขที่สัญญา</span>
+                                <span className="font-medium text-gray-700">{c.contract_number || '-'}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400 block mb-0.5">ชื่อโครงการ</span>
+                                <span className="font-medium text-gray-700 truncate block">{c.project_name || '-'}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400 block mb-0.5">ระยะเวลาโครงการ</span>
+                                <span className="font-medium text-gray-700">{fmtDate(c.start_date)} – {fmtDate(c.end_date)}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400 block mb-0.5">มูลค่าสัญญา</span>
+                                <span className="font-medium text-gray-700">{c.value > 0 ? fmt(c.value) : '-'}</span>
+                              </div>
+                            </div>
+                            <div className="border-t border-gray-200 pt-3 mb-3">
+                              <p className="text-xs font-medium text-gray-500 mb-2">รายการเอกสาร</p>
+                              {c.documents && c.documents.length > 0 ? (
+                                <div className="grid grid-cols-3 gap-2">
+                                  {c.documents.map((doc, idx) => (
+                                    <div key={doc.id || idx} className="bg-white rounded-lg p-2 border border-gray-200">
+                                      <p className="text-xs font-medium text-gray-700 truncate">{doc.filename}</p>
+                                      <p className="text-[10px] text-gray-400 mt-0.5">{doc.document_type || 'เอกสาร'}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-gray-400 italic">ไม่มีเอกสารแนบ</p>
                               )}
-                              {c.description && <div className="col-span-2"><span className="text-gray-400">คำอธิบาย:</span> {c.description}</div>}
                             </div>
                             <button
                               onClick={() => handleSelectContract(c)}
-                              className="mt-2 w-full py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 transition font-medium"
+                              className="w-full py-2 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 transition font-medium"
                             >
                               เลือกสัญญานี้
                             </button>
@@ -704,15 +694,20 @@ export default function DocumentUpload() {
               </div>
             )}
 
-            {/* Continue button */}
+            {/* Proceed button */}
             {uploadMode && (
               <div className="flex justify-end">
                 <button
                   onClick={() => setStep('upload')}
                   disabled={!canProceedStep1}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  className={`inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm
+                    ${canProceedStep1
+                      ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200 hover:shadow-blue-300 hover:shadow-md'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
                 >
-                  ไปขั้นตอนถัดไป <ChevronRight className="w-4 h-4" />
+                  ถัดไป — อัพโหลดไฟล์
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
             )}
@@ -720,47 +715,10 @@ export default function DocumentUpload() {
         )}
 
         {/* ──────────────────────────────────────────────────────
-            STEP 2: UPLOAD + PROCESS
+            STEP 2: UPLOAD + JOB TRACKING
         ────────────────────────────────────────────────────── */}
         {step === 'upload' && (
           <div className="space-y-5">
-            {/* Context banner */}
-            <div className={`rounded-xl p-4 flex items-center justify-between border ${
-              uploadMode === 'main' ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'
-            }`}>
-              <div className="flex items-center gap-3">
-                {uploadMode === 'main'
-                  ? <FilePlus className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                  : <Building2 className="w-5 h-5 text-green-600 flex-shrink-0" />
-                }
-                <div>
-                  <p className={`text-sm font-medium ${uploadMode === 'main' ? 'text-blue-900' : 'text-green-900'}`}>
-                    {uploadMode === 'main'
-                      ? 'สัญญาหลักใหม่ — AI จะถอดข้อมูลอัตโนมัติ'
-                      : `สัญญา: ${selectedContract?.title}`
-                    }
-                  </p>
-                  {uploadMode === 'attach' && selectedContract && (
-                    <p className="text-xs text-green-700">
-                      {selectedContract.contract_number && `เลขที่ ${selectedContract.contract_number} · `}
-                      {selectedContract.vendor_name}
-                    </p>
-                  )}
-                  {uploadMode === 'main' && selectedLLMId && (
-                    <p className="text-xs text-blue-600">
-                      AI: {llmProviders.find(p => p.id === selectedLLMId)?.name || selectedLLMId}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <button
-                onClick={() => { setStep('choose'); setSelectedFile(null) }}
-                className={`p-1.5 rounded-lg ${uploadMode === 'main' ? 'hover:bg-blue-100' : 'hover:bg-green-100'}`}
-              >
-                <X className={`w-4 h-4 ${uploadMode === 'main' ? 'text-blue-500' : 'text-green-500'}`} />
-              </button>
-            </div>
-
             {/* Attach mode: document type + draft toggle */}
             {uploadMode === 'attach' && (
               <div className="bg-white rounded-xl shadow-sm border p-6">
@@ -770,11 +728,8 @@ export default function DocumentUpload() {
                     <button
                       key={dt.value}
                       onClick={() => setSelectedDocType(dt.value)}
-                      className={`p-3 rounded-lg border-2 text-left transition text-sm ${
-                        selectedDocType === dt.value
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
+                      className={`p-3 rounded-lg border-2 text-left transition text-sm ${selectedDocType === dt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                        }`}
                     >
                       <p className={`font-medium ${selectedDocType === dt.value ? 'text-blue-700' : 'text-gray-800'}`}>
                         {dt.label}
@@ -787,17 +742,15 @@ export default function DocumentUpload() {
                   <div className="flex gap-3">
                     <button
                       onClick={() => setIsDraft(false)}
-                      className={`flex-1 py-2.5 px-4 rounded-lg border-2 text-sm font-medium transition ${
-                        !isDraft ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                      }`}
+                      className={`flex-1 py-2.5 px-4 rounded-lg border-2 text-sm font-medium transition ${!isDraft ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                        }`}
                     >
                       <FileCheck className="w-4 h-4 inline mr-1.5" />เอกสารหลัก
                     </button>
                     <button
                       onClick={() => setIsDraft(true)}
-                      className={`flex-1 py-2.5 px-4 rounded-lg border-2 text-sm font-medium transition ${
-                        isDraft ? 'border-yellow-500 bg-yellow-50 text-yellow-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                      }`}
+                      className={`flex-1 py-2.5 px-4 rounded-lg border-2 text-sm font-medium transition ${isDraft ? 'border-yellow-500 bg-yellow-50 text-yellow-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                        }`}
                     >
                       <Edit3 className="w-4 h-4 inline mr-1.5" />เอกสารร่าง
                     </button>
@@ -812,7 +765,6 @@ export default function DocumentUpload() {
                 <h3 className="font-semibold text-gray-900">
                   {uploadMode === 'main' ? 'อัพโหลดไฟล์สัญญา' : 'อัพโหลดเอกสาร'}
                 </h3>
-                {/* OCR engine badge */}
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
                   <ScanText className="w-3.5 h-3.5" />
                   OCR: {ocrEngineName}
@@ -824,9 +776,8 @@ export default function DocumentUpload() {
                   onDragLeave={() => setDragOver(false)}
                   onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files[0]) handleFileSelect(e.dataTransfer.files[0]) }}
                   onClick={() => fileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition ${
-                    dragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/30'
-                  }`}
+                  className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition ${dragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/30'
+                    }`}
                 >
                   <Upload className="w-12 h-12 mx-auto mb-3 text-gray-400" />
                   <p className="font-medium text-gray-700">ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือก</p>
@@ -855,285 +806,83 @@ export default function DocumentUpload() {
               )}
             </div>
 
-            {/* Processing progress (shown while processing) */}
-            {processing && (
-              <div className="bg-white rounded-xl shadow-sm border p-5">
-                <div className="flex items-center gap-3 mb-4">
-                  <Loader2 className="w-5 h-5 animate-spin text-blue-600 flex-shrink-0" />
-                  <p className="font-medium text-gray-800">กำลังประมวลผล...</p>
+            {/* Upload success flash */}
+            {uploadDone && (
+              <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
+                <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <CheckCircle className="w-4 h-4 text-green-600" />
                 </div>
-                <div className="flex gap-3">
-                  {/* Phase 1: OCR */}
-                  <div className={`flex-1 rounded-lg p-3 border-2 transition-all ${
-                    processingPhase === 'ocr'
-                      ? 'border-indigo-400 bg-indigo-50'
-                      : processingPhase === 'llm'
-                      ? 'border-green-300 bg-green-50'
-                      : 'border-gray-200 bg-gray-50'
-                  }`}>
-                    <div className="flex items-center gap-2 mb-1">
-                      {processingPhase === 'llm'
-                        ? <CheckCircle className="w-4 h-4 text-green-500" />
-                        : <ScanText className={`w-4 h-4 ${processingPhase === 'ocr' ? 'text-indigo-600 animate-pulse' : 'text-gray-400'}`} />
-                      }
-                      <span className={`text-sm font-medium ${
-                        processingPhase === 'ocr' ? 'text-indigo-700' : processingPhase === 'llm' ? 'text-green-700' : 'text-gray-500'
-                      }`}>
-                        ขั้นที่ 1: OCR
-                      </span>
-                    </div>
-                    <p className={`text-xs ${processingPhase === 'ocr' ? 'text-indigo-600' : 'text-gray-400'}`}>
-                      {ocrEngineName}
-                    </p>
-                  </div>
-                  {/* Arrow */}
-                  <div className="flex items-center text-gray-300">
-                    <ChevronRight className="w-5 h-5" />
-                  </div>
-                  {/* Phase 2: LLM */}
-                  <div className={`flex-1 rounded-lg p-3 border-2 transition-all ${
-                    processingPhase === 'llm'
-                      ? 'border-purple-400 bg-purple-50'
-                      : 'border-gray-200 bg-gray-50'
-                  }`}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <Brain className={`w-4 h-4 ${processingPhase === 'llm' ? 'text-purple-600 animate-pulse' : 'text-gray-400'}`} />
-                      <span className={`text-sm font-medium ${processingPhase === 'llm' ? 'text-purple-700' : 'text-gray-400'}`}>
-                        ขั้นที่ 2: AI ถอดข้อมูล
-                      </span>
-                    </div>
-                    <p className={`text-xs ${processingPhase === 'llm' ? 'text-purple-600' : 'text-gray-400'}`}>
-                      {selectedLLMId
-                        ? llmProviders.find(p => p.id === selectedLLMId)?.name || 'LLM'
-                        : 'ไม่ได้ตั้งค่า LLM'
-                      }
-                    </p>
-                  </div>
+                <div>
+                  <p className="font-semibold text-green-900 text-sm">อัพโหลดสำเร็จ! ไฟล์อยู่ในคิวประมวลผล</p>
+                  <p className="text-xs text-green-700 mt-0.5">
+                    ไฟล์กำลังอยู่ในคิวประมวลผล — กรุณารอสักครู่แล้วรีเฟรชหน้าเพื่อตรวจสอบผล
+                  </p>
                 </div>
               </div>
             )}
 
-            {/* Action buttons */}
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => { setStep('choose'); setSelectedFile(null) }}
-                className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-                disabled={processing}
-              >
-                ← ย้อนกลับ
-              </button>
-              <button
-                onClick={handleProcessFile}
-                disabled={!selectedFile || processing}
-                className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-              >
-                {processing
-                  ? <><Loader2 className="w-4 h-4 animate-spin" /> กำลังประมวลผล...</>
-                  : <><Sparkles className="w-4 h-4" /> เริ่มประมวลผล OCR + AI</>
-                }
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ──────────────────────────────────────────────────────
-            STEP 3: REVIEW + SAVE
-        ────────────────────────────────────────────────────── */}
-        {step === 'review' && !savedDocId && (
-          <div className="space-y-5">
-            {/* Header */}
-            <div className="bg-white rounded-xl shadow-sm border p-5 flex items-center gap-3">
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Sparkles className="w-5 h-5 text-purple-600" />
+            {/* Upload success — replace action buttons */}
+            {uploadDone ? (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center space-y-4">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+                  <CheckCircle className="w-7 h-7 text-green-600" />
+                </div>
+                <div>
+                  <p className="font-bold text-green-900 text-base">อัพโหลดสำเร็จ! ไฟล์อยู่ในคิวประมวลผล</p>
+                  <p className="text-sm text-green-700 mt-1">
+                    ระบบจะทำการ OCR และ AI extraction โดยอัตโนมัติ — ติดตามผลได้ที่หน้างานประมวลผล
+                  </p>
+                </div>
+                <div className="flex items-center justify-center gap-3 flex-wrap pt-1">
+                  <button
+                    onClick={() => navigate('/jobs')}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition shadow-sm"
+                  >
+                    <Brain className="w-4 h-4" />
+                    ดูหน้างานประมวลผล
+                  </button>
+                  <button
+                    onClick={() => navigate('/')}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-white text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-50 transition border"
+                  >
+                    <Home className="w-4 h-4" />
+                    กลับหน้าหลัก
+                  </button>
+                  <button
+                    onClick={() => { setUploadDone(false); setSelectedFile(null) }}
+                    className="text-sm text-gray-400 hover:text-gray-600 px-3 py-2.5 transition"
+                  >
+                    อัพโหลดไฟล์เพิ่ม
+                  </button>
+                </div>
               </div>
-              <div className="flex-1">
-                <h2 className="font-semibold text-gray-900">ตรวจสอบและแก้ไขข้อมูล</h2>
-                <p className="text-sm text-gray-500">
-                  ไฟล์: <span className="font-medium">{selectedFile?.name}</span>
-                </p>
-                <div className="flex flex-wrap items-center gap-2 mt-1">
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                    ocrError ? 'bg-red-100 text-red-700' : 'bg-indigo-100 text-indigo-700'
-                  }`}>
-                    <ScanText className="w-3 h-3" />
-                    OCR: {ocrEngine}
-                    {ocrError && ' ⚠'}
-                  </span>
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                    llmError ? 'bg-red-100 text-red-700' : 'bg-purple-100 text-purple-700'
-                  }`}>
-                    <Brain className="w-3 h-3" />
-                    AI: {llmError ? 'ไม่สำเร็จ ⚠' : 'สกัดข้อมูลแล้ว'}
-                  </span>
-                  {rawOcrText && (
-                    <span className="text-xs text-gray-400">
-                      ({rawOcrText.length.toLocaleString()} ตัวอักษร)
-                    </span>
+            ) : (
+              /* Action buttons — only show before upload */
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => { setStep('choose'); setSelectedFile(null) }}
+                  className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  ← ย้อนกลับ
+                </button>
+                <button
+                  onClick={handleUploadJob}
+                  disabled={!selectedFile || uploading}
+                  className={`inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm
+                    ${selectedFile && !uploading
+                      ? 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                >
+                  {uploading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" />กำลังอัพโหลด...</>
+                  ) : (
+                    <><Upload className="w-4 h-4" />ส่งประมวลผล<ChevronRight className="w-4 h-4" /></>
                   )}
-                </div>
-              </div>
-            </div>
-
-            {/* OCR / LLM error banners */}
-            {ocrError && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3 text-sm text-red-800">
-                <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-medium mb-0.5">OCR ล้มเหลว</p>
-                  <p className="text-xs text-red-600">{ocrError}</p>
-                </div>
-              </div>
-            )}
-            {llmError && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3 text-sm text-amber-800">
-                <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-medium mb-0.5">AI ถอดข้อมูลไม่สำเร็จ — กรุณากรอกข้อมูลด้านล่างด้วยตนเอง</p>
-                  <p className="text-xs text-amber-600">{llmError}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Editable fields */}
-            <div className="bg-white rounded-xl shadow-sm border p-6">
-              <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                <Briefcase className="w-4 h-4 text-blue-600" />
-                ข้อมูลสัญญา
-                {uploadMode === 'main' && (
-                  <span className="text-xs font-normal text-gray-400 ml-1">(จะถูกสร้างเป็นสัญญาใหม่)</span>
-                )}
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">เลขที่สัญญา</label>
-                  <input value={editData.contract_number} onChange={e => setEditData(p => ({ ...p, contract_number: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">ชื่อสัญญา/โครงการ</label>
-                  <input value={editData.title} onChange={e => setEditData(p => ({ ...p, title: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">ผู้รับจ้าง/คู่สัญญา</label>
-                  <input value={editData.counterparty} onChange={e => setEditData(p => ({ ...p, counterparty: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">ประเภทสัญญา</label>
-                  <select value={editData.contract_type} onChange={e => setEditData(p => ({ ...p, contract_type: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
-                    <option value="">— เลือก —</option>
-                    {CONTRACT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">มูลค่าสัญญา (บาท)</label>
-                  <input type="number" value={editData.contract_value} onChange={e => setEditData(p => ({ ...p, contract_value: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">ชื่อโครงการ</label>
-                  <input value={editData.project_name} onChange={e => setEditData(p => ({ ...p, project_name: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">วันที่เริ่มต้น</label>
-                  <input type="date" value={editData.start_date} onChange={e => setEditData(p => ({ ...p, start_date: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">วันที่สิ้นสุด</label>
-                  <input type="date" value={editData.end_date} onChange={e => setEditData(p => ({ ...p, end_date: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-                </div>
-              </div>
-            </div>
-
-            {/* Raw OCR text (collapsible) */}
-            {rawOcrText && (
-              <div className="bg-white rounded-xl shadow-sm border">
-                <button
-                  onClick={() => setShowRawText(p => !p)}
-                  className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50"
-                >
-                  <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-gray-400" />
-                    ข้อความ OCR ดิบ ({rawOcrText.length.toLocaleString()} ตัวอักษร)
-                  </span>
-                  {showRawText ? <EyeOff className="w-4 h-4 text-gray-400" /> : <Eye className="w-4 h-4 text-gray-400" />}
                 </button>
-                {showRawText && (
-                  <div className="px-4 pb-4">
-                    <pre className="bg-gray-900 text-green-300 text-xs rounded-lg p-4 overflow-x-auto max-h-60 whitespace-pre-wrap font-mono leading-relaxed">
-                      {rawOcrText}
-                    </pre>
-                  </div>
-                )}
               </div>
             )}
 
-            {/* Info note */}
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 flex gap-3">
-              <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="font-medium mb-1">ข้อมูลจะถูกบันทึกเมื่อกด "บันทึก"</p>
-                <p>บันทึกลง PostgreSQL · MinIO · VectorDB (RAG) · Neo4j (GraphRAG)</p>
-              </div>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center justify-between">
-              <button onClick={() => setStep('upload')} className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">
-                ← ย้อนกลับ
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-2 px-7 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-              >
-                {saving
-                  ? <><Loader2 className="w-4 h-4 animate-spin" /> กำลังบันทึก...</>
-                  : <><Save className="w-4 h-4" /> บันทึก</>
-                }
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Success ───────────────────────────────────────────── */}
-        {savedDocId && (
-          <div className="bg-white rounded-xl shadow-sm border p-12 text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <CheckCircle className="w-9 h-9 text-green-600" />
-            </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">บันทึกสำเร็จ!</h2>
-            <p className="text-gray-500 mb-1">
-              เอกสาร <span className="font-medium">{selectedFile?.name}</span> ถูกบันทึกแล้ว
-            </p>
-            <p className="text-sm text-gray-400 mb-8">ข้อความ OCR กำลัง index ลง ContractRAG + GraphRAG ในพื้นหลัง</p>
-            <div className="flex items-center justify-center gap-3 flex-wrap">
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
-              >
-                <Upload className="w-4 h-4" />อัพโหลดเพิ่มเติม
-              </button>
-              <button
-                onClick={() => navigate('/')}
-                className="flex items-center gap-2 px-5 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition font-medium"
-              >
-                <Home className="w-4 h-4" />กลับหน้าแรก
-              </button>
-              {selectedContract && (
-                <button
-                  onClick={() => navigate(`/contracts/${selectedContract.id}`)}
-                  className="flex items-center gap-2 px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition font-medium"
-                >
-                  <FileText className="w-4 h-4" />ดูสัญญา
-                </button>
-              )}
-            </div>
           </div>
         )}
 

@@ -306,3 +306,63 @@ class RAGService:
 
         logger.info(f"Knowledge base {kb_id} marked as indexed")
         return True
+
+    async def remove_document(self, document_id: str, kb_id: Optional[str] = None) -> bool:
+        """
+        Remove all vector chunks for a document from the knowledge base(s).
+
+        Args:
+            document_id: The document DB id to remove.
+            kb_id: If provided, only remove from this specific KB. Otherwise remove from all KBs.
+
+        Returns:
+            True if any chunks were deleted, False if nothing was found.
+        """
+        try:
+            # Check if vector_chunks table exists
+            table_exists = self.db.execute(text(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+                "WHERE table_name = 'vector_chunks')"
+            )).scalar()
+
+            deleted_count = 0
+            if table_exists:
+                if kb_id:
+                    result = self.db.execute(text(
+                        "DELETE FROM vector_chunks WHERE document_id = :doc_id AND kb_id = :kb_id"
+                    ), {"doc_id": document_id, "kb_id": kb_id})
+                else:
+                    result = self.db.execute(text(
+                        "DELETE FROM vector_chunks WHERE document_id = :doc_id"
+                    ), {"doc_id": document_id})
+                deleted_count = result.rowcount
+                logger.info(f"Deleted {deleted_count} vector chunks for document {document_id}")
+
+            # Update KnowledgeBase metadata: remove from document_ids list and adjust counts
+            kb_filter = (
+                self.db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id)
+                if kb_id
+                else self.db.query(KnowledgeBase)
+            )
+            for kb in kb_filter.all():
+                doc_ids = list(kb.document_ids or [])
+                if document_id in doc_ids:
+                    doc_ids.remove(document_id)
+                    kb.document_ids = doc_ids
+                    kb.document_count = len(doc_ids)
+                    # Recount chunks for this KB
+                    if table_exists:
+                        chunk_count = self.db.execute(text(
+                            "SELECT COUNT(*) FROM vector_chunks WHERE kb_id = :kb_id"
+                        ), {"kb_id": kb.id}).scalar()
+                        kb.total_chunks = chunk_count
+                    logger.info(f"Removed doc {document_id} from KB {kb.id}")
+
+            self.db.commit()
+            return deleted_count > 0
+
+        except Exception as e:
+            logger.error(f"remove_document failed for doc {document_id}: {e}")
+            self.db.rollback()
+            return False
+

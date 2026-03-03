@@ -180,6 +180,36 @@ class BaseGraphService(ABC):
             logger.error(f"[{self.domain.value}] Failed to clear graph data: {e}")
             return {"deleted_entities": 0, "deleted_documents": 0, "deleted_relationships": 0, "error": str(e)}
 
+    def delete_document_data(self, document_id: str) -> bool:
+        """
+        Delete all graph nodes and relationships for a specific document.
+        - Deletes the DOC_ENTITY_{document_id} node
+        - Deletes all entities whose source_doc equals document_id
+        - DETACH DELETE removes all connected relationships automatically
+        """
+        if not self.driver:
+            return True
+
+        domain_label = self._get_domain_label()
+        try:
+            with self.driver.session() as session:
+                result = session.run(
+                    f"""
+                    MATCH (e:Entity:{domain_label})
+                    WHERE e.source_doc = $doc_id OR e.id = $doc_entity_id
+                    DETACH DELETE e
+                    RETURN count(e) AS deleted
+                    """,
+                    {"doc_id": document_id, "doc_entity_id": f"DOC_ENTITY_{document_id}"},
+                )
+                record = result.single()
+                deleted = record["deleted"] if record else 0
+                logger.info(f"[{self.domain.value}] Deleted {deleted} graph nodes for document {document_id}")
+                return True
+        except Exception as e:
+            logger.error(f"[{self.domain.value}] Failed to delete graph data for document {document_id}: {e}")
+            return False
+
     @staticmethod
     def _serialize_props(props: Dict[str, Any]) -> str:
         """Serialize properties dict to JSON string for Neo4j storage"""

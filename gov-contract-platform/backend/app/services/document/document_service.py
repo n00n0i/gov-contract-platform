@@ -313,16 +313,59 @@ class DocumentService:
         return document
     
     def delete_document(self, document_id: str):
-        """Soft delete document"""
+        """Soft delete document and clean up all linked data (vector chunks, KB record, graph nodes)"""
+        from sqlalchemy import text as _text
+
         document = self.get_document(document_id)
-        
+
+        # 1. Soft-delete the ContractAttachment record
         document.is_deleted = 1
         document.deleted_by = self.user_id
         document.deleted_at = datetime.utcnow()
-        
         self.db.commit()
-        
-        logger.info(f"Document deleted: {document_id}")
+
+        # 2. Delete vector chunks for this document
+        try:
+            self.db.execute(
+                _text("DELETE FROM vector_chunks WHERE document_id = :did"),
+                {"did": document_id},
+            )
+            self.db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to delete vector_chunks for {document_id}: {e}")
+            self.db.rollback()
+
+        # 3. Delete KBDocument record (removes it from KB document list) and recompute KB stats
+        try:
+            from app.models.ai_models import KBDocument, KnowledgeBase
+            self.db.query(KBDocument).filter(KBDocument.id == document_id).delete()
+            self.db.commit()
+            # Recompute stats for all affected KBs (vector_chunks already cleaned above)
+            rows = self.db.execute(
+                _text(
+                    "SELECT kb_id, COUNT(DISTINCT document_id) AS dc, COUNT(*) AS tc "
+                    "FROM vector_chunks GROUP BY kb_id"
+                )
+            ).fetchall()
+            for row in rows:
+                kb_obj = self.db.query(KnowledgeBase).filter(KnowledgeBase.id == row[0]).first()
+                if kb_obj:
+                    kb_obj.document_count = row[1]
+                    kb_obj.total_chunks = row[2]
+            self.db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to delete KBDocument / update KB stats for {document_id}: {e}")
+            self.db.rollback()
+
+        # 4. Delete graph nodes in Neo4j (entities + relationships via DETACH DELETE)
+        try:
+            from app.services.graph import get_contracts_graph_service
+            graph_service = get_contracts_graph_service()
+            graph_service.delete_document_data(document_id)
+        except Exception as e:
+            logger.warning(f"Failed to delete graph data for {document_id}: {e}")
+
+        logger.info(f"Document deleted (with cleanup): {document_id}")
     
     def process_ocr(self, document_id: str) -> OCRResult:
         """

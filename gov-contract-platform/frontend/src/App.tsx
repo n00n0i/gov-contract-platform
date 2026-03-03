@@ -14,6 +14,7 @@ import Reports from './pages/Reports'
 import Notifications from './pages/Notifications'
 import CreateContract from './pages/CreateContract'
 import KnowledgeBases from './pages/KnowledgeBases'
+import JobsPage from './pages/JobsPage'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import { setupTokenRefresh } from './services/authService'
 
@@ -88,7 +89,7 @@ function App() {
       <Routes>
         {/* Public Routes */}
         <Route path="/login" element={<Login />} />
-        
+
         {/* Protected Routes */}
         <Route path="/" element={
           <ProtectedRoute>
@@ -153,6 +154,11 @@ function App() {
         <Route path="/knowledge-bases" element={
           <ProtectedRoute>
             <KnowledgeBases />
+          </ProtectedRoute>
+        } />
+        <Route path="/jobs" element={
+          <ProtectedRoute>
+            <JobsPage />
           </ProtectedRoute>
         } />
       </Routes>

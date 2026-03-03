@@ -30,6 +30,7 @@ from app.models.access_control import (
     KBOrgAccess, KBUserAccess, ContractVisibility,
     OrgDelegation, AccessLog
 )
+from app.models.document_job import DocumentProcessingJob
 
 __all__ = [
     # Base
@@ -90,4 +91,6 @@ __all__ = [
     "ContractVisibility",
     "OrgDelegation",
     "AccessLog",
+    # Document Jobs
+    "DocumentProcessingJob",
 ]

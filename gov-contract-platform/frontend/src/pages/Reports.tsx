@@ -44,7 +44,7 @@ interface VendorStats { total_vendors: number; active_vendors: number; blacklist
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (v: number) =>
-  new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(v)
+  new Intl.NumberFormat('th-TH').format(v) + ' บาท'
 const fmtN = (v: number) => new Intl.NumberFormat('th-TH').format(v)
 const fmtM = (v: number) => {
   if (v >= 1e9) return `${(v / 1e9).toFixed(1)} พันล.`

@@ -3,7 +3,8 @@ import { useNavigate, Link } from 'react-router-dom'
 import {
   Upload, FileText, Users, ChevronDown, User, LogOut,
   AlertTriangle, Clock, CheckCircle, TrendingUp, Calendar,
-  ArrowRight, Shield, Briefcase, Search, Wallet, MessageSquare, BookOpen
+  ArrowRight, Shield, Briefcase, Search, Wallet, MessageSquare, BookOpen,
+  Loader2, Brain, XCircle,
 } from 'lucide-react'
 import NotificationDropdown from '../components/NotificationDropdown'
 import ChatSidebar from '../components/ChatSidebar'
@@ -51,11 +52,20 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('')
   const [chatOpen, setChatOpen] = useState(false)
   const [pendingQuestion, setPendingQuestion] = useState('')
+  const [jobStats, setJobStats] = useState({ pending: 0, processing: 0, completed: 0, failed: 0, total: 0 })
 
   useEffect(() => {
     fetchUser()
     fetchStats()
+    fetchJobStats()
   }, [])
+
+  const fetchJobStats = async () => {
+    try {
+      const r = await api.get('/documents/jobs/stats')
+      if (r.data.success) setJobStats(r.data.data)
+    } catch { /* ignore */ }
+  }
 
   const fetchUser = async () => {
     const token = localStorage.getItem('access_token')
@@ -109,8 +119,8 @@ export default function Dashboard() {
   }
 
   const formatCurrency = (value: number) => {
-    if (!value || value === 0) return '0'
-    return new Intl.NumberFormat('th-TH').format(value)
+    if (!value || value === 0) return '0 บาท'
+    return new Intl.NumberFormat('th-TH').format(value) + ' บาท'
   }
 
   const formatDate = (dateStr: string) => {
@@ -277,225 +287,324 @@ export default function Dashboard() {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
           <Link
             to="/upload"
-            className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-blue-500"
+            className="bg-white rounded-xl shadow-md p-5 hover:shadow-lg transition border-2 border-transparent hover:border-blue-500"
           >
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-blue-100 rounded-lg">
-                <Upload className="w-8 h-8 text-blue-600" />
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-blue-100 rounded-lg flex-shrink-0">
+                <Upload className="w-7 h-7 text-blue-600" />
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">อัปโหลดเอกสาร</h3>
-                <p className="text-sm text-gray-500">OCR & AI Extraction</p>
+                <h3 className="font-semibold text-gray-900 text-sm">อัปโหลดเอกสาร</h3>
+                <p className="text-xs text-gray-500">OCR &amp; AI</p>
               </div>
             </div>
           </Link>
 
           <Link
             to="/contracts"
-            className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-purple-500"
+            className="bg-white rounded-xl shadow-md p-5 hover:shadow-lg transition border-2 border-transparent hover:border-purple-500"
           >
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-purple-100 rounded-lg">
-                <FileText className="w-8 h-8 text-purple-600" />
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-purple-100 rounded-lg flex-shrink-0">
+                <FileText className="w-7 h-7 text-purple-600" />
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">สัญญา</h3>
-                <p className="text-sm text-gray-500">จัดการสัญญาทั้งหมด</p>
+                <h3 className="font-semibold text-gray-900 text-sm">สัญญา</h3>
+                <p className="text-xs text-gray-500">จัดการสัญญา</p>
               </div>
             </div>
           </Link>
 
           <Link
             to="/vendors"
-            className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-green-500"
+            className="bg-white rounded-xl shadow-md p-5 hover:shadow-lg transition border-2 border-transparent hover:border-green-500"
           >
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-green-100 rounded-lg">
-                <Users className="w-8 h-8 text-green-600" />
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-green-100 rounded-lg flex-shrink-0">
+                <Users className="w-7 h-7 text-green-600" />
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">ผู้รับจ้าง</h3>
-                <p className="text-sm text-gray-500">ทะเบียนผู้รับจ้าง</p>
+                <h3 className="font-semibold text-gray-900 text-sm">ผู้รับจ้าง</h3>
+                <p className="text-xs text-gray-500">ทะเบียน</p>
               </div>
             </div>
           </Link>
 
           <Link
             to="/knowledge-bases"
-            className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-indigo-500"
+            className="bg-white rounded-xl shadow-md p-5 hover:shadow-lg transition border-2 border-transparent hover:border-indigo-500"
           >
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-indigo-100 rounded-lg">
-                <BookOpen className="w-8 h-8 text-indigo-600" />
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-indigo-100 rounded-lg flex-shrink-0">
+                <BookOpen className="w-7 h-7 text-indigo-600" />
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">Knowledge Base</h3>
-                <p className="text-sm text-gray-500">RAG & GraphRAG</p>
+                <h3 className="font-semibold text-gray-900 text-sm">Knowledge</h3>
+                <p className="text-xs text-gray-500">RAG &amp; Graph</p>
+              </div>
+            </div>
+          </Link>
+
+          {/* ── งานประมวลผล ── */}
+          <Link
+            to="/jobs"
+            className="bg-white rounded-xl shadow-md p-5 hover:shadow-lg transition border-2 border-transparent hover:border-violet-500 relative"
+          >
+            {(jobStats.pending + jobStats.processing) > 0 && (
+              <span className="absolute -top-2 -right-2 w-5 h-5 bg-blue-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                {jobStats.pending + jobStats.processing}
+              </span>
+            )}
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-violet-100 rounded-lg flex-shrink-0">
+                <Brain className="w-7 h-7 text-violet-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900 text-sm">งานประมวลผล</h3>
+                <p className="text-xs text-gray-500">OCR Jobs</p>
               </div>
             </div>
           </Link>
 
           <Link
             to="/reports"
-            className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition border-2 border-transparent hover:border-orange-500"
+            className="bg-white rounded-xl shadow-md p-5 hover:shadow-lg transition border-2 border-transparent hover:border-orange-500"
           >
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-orange-100 rounded-lg">
-                <TrendingUp className="w-8 h-8 text-orange-600" />
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-orange-100 rounded-lg flex-shrink-0">
+                <TrendingUp className="w-7 h-7 text-orange-600" />
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">รายงาน</h3>
-                <p className="text-sm text-gray-500">วิเคราะห์และสถิติ</p>
+                <h3 className="font-semibold text-gray-900 text-sm">รายงาน</h3>
+                <p className="text-xs text-gray-500">วิเคราะห์</p>
               </div>
             </div>
           </Link>
         </div>
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-          <StatCard
-            icon={<FileText className="w-5 h-5 text-blue-600" />}
-            title="สัญญาทั้งหมด"
-            value={stats.totalContracts}
-            color="blue"
-            suffix="รายการ"
-          />
-          <StatCard
-            icon={<CheckCircle className="w-5 h-5 text-green-600" />}
-            title="สัญญาที่ใช้งาน"
-            value={stats.activeContracts}
-            color="green"
-            suffix="สัญญา"
-          />
-          <StatCard
-            icon={<AlertTriangle className="w-5 h-5 text-orange-600" />}
-            title="ใกล้หมดอายุ"
-            value={stats.expiringSoon}
-            color="orange"
-            suffix="สัญญา"
-          />
-          <StatCard
-            icon={<span className="text-lg font-bold text-purple-600">฿</span>}
-            title="มูลค่ารวม"
-            value={formatCurrency(stats.totalValue)}
-            color="purple"
-            suffix="บาท"
-          />
-          <StatCard
-            icon={<Clock className="w-5 h-5 text-yellow-600" />}
-            title="รออนุมัติ"
-            value={stats.pendingApproval}
-            color="yellow"
-            suffix="รายการ"
-          />
-          <StatCard
-            icon={<Calendar className="w-5 h-5 text-red-600" />}
-            title="รอชำระเงิน"
-            value={stats.pendingPayment}
-            color="red"
-            suffix="รายการ"
-          />
+        {/* Stats Overview - Clean & Minimal */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {/* Card 1: Contract Overview */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-50 rounded-lg">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                </div>
+                <span className="text-sm font-medium text-gray-600">ภาพรวมสัญญา</span>
+              </div>
+              <Link to="/contracts" className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+                ดูทั้งหมด
+              </Link>
+            </div>
+            <div className="flex items-end gap-4">
+              <div>
+                <p className="text-3xl font-bold text-gray-900">{stats.totalContracts}</p>
+                <p className="text-xs text-gray-500 mt-0.5">สัญญาทั้งหมด</p>
+              </div>
+              <div className="flex gap-3 text-xs mb-1">
+                <span className="text-green-600 font-medium">{stats.activeContracts} ใช้งาน</span>
+                {stats.expiringSoon > 0 && (
+                  <span className="text-orange-600 font-medium">{stats.expiringSoon} ใกล้หมด</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Total Value */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-purple-50 rounded-lg">
+                  <span className="text-lg font-bold text-purple-600">฿</span>
+                </div>
+                <span className="text-sm font-medium text-gray-600">มูลค่ารวม</span>
+              </div>
+            </div>
+            <div>
+              <p className="text-3xl font-bold text-gray-900">{formatCurrency(stats.totalValue)}</p>
+              <p className="text-xs text-gray-500 mt-0.5">บาท</p>
+            </div>
+          </div>
+
+          {/* Card 3: Pending Tasks */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-50 rounded-lg">
+                  <Clock className="w-5 h-5 text-amber-600" />
+                </div>
+                <span className="text-sm font-medium text-gray-600">รอดำเนินการ</span>
+              </div>
+            </div>
+            <div className="flex gap-6">
+              <div>
+                <p className="text-3xl font-bold text-gray-900">{stats.pendingApproval}</p>
+                <p className="text-xs text-gray-500 mt-0.5">รออนุมัติ</p>
+              </div>
+              <div className="w-px bg-gray-200"></div>
+              <div>
+                <p className="text-3xl font-bold text-gray-900">{stats.pendingPayment}</p>
+                <p className="text-xs text-gray-500 mt-0.5">รอชำระ</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 4: Processing Jobs */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-50 rounded-lg">
+                  <Brain className="w-5 h-5 text-indigo-600" />
+                </div>
+                <span className="text-sm font-medium text-gray-600">Job Box</span>
+              </div>
+              <a href="/upload" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">ดูทั้งหมด</a>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="text-gray-600">กำลังประมวลผล</span>
+                </div>
+                <span className="font-bold text-blue-600">{jobStats.processing + jobStats.pending}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                  <span className="text-gray-600">สำเร็จแล้ว</span>
+                </div>
+                <span className="font-bold text-green-600">{jobStats.completed}</span>
+              </div>
+              {jobStats.failed > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <XCircle className="w-3.5 h-3.5 text-red-500" />
+                    <span className="text-gray-600">ล้มเหลว</span>
+                  </div>
+                  <span className="font-bold text-red-600">{jobStats.failed}</span>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Expiring Contracts */}
+        {/* Main Content Area - Two Column Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column - Expiring Contracts (2/3 width) */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-xl shadow-md overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-800">สัญญาใกล้หมดอายุ</h3>
-                  <p className="text-sm text-gray-500">สัญญาที่จะหมดอายุภายใน 60 วัน</p>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              {/* Header */}
+              <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-orange-50 rounded-lg">
+                    <AlertTriangle className="w-4 h-4 text-orange-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">สัญญาใกล้หมดอายุ</h3>
+                    <p className="text-xs text-gray-500">ภายใน 60 วัน</p>
+                  </div>
                 </div>
                 <Link
                   to="/contracts?filter=expiring"
-                  className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
                 >
                   ดูทั้งหมด <ArrowRight className="w-4 h-4" />
                 </Link>
               </div>
 
-              <div className="divide-y divide-gray-100">
+              {/* Content */}
+              <div className="divide-y divide-gray-50">
                 {contracts.length > 0 ? contracts.map((contract) => (
-                  <div key={contract.id} className="px-6 py-4 hover:bg-gray-50 transition">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-1 text-xs rounded-full ${contract.status === 'active' ? 'bg-green-100 text-green-700' :
-                              contract.status === 'warning' ? 'bg-orange-100 text-orange-700' :
-                                'bg-red-100 text-red-700'
+                  <div key={contract.id} className="px-5 py-3.5 hover:bg-gray-50 transition cursor-pointer">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${contract.status === 'active' ? 'bg-green-100 text-green-700' :
+                            contract.status === 'warning' ? 'bg-orange-100 text-orange-700' :
+                              'bg-red-100 text-red-700'
                             }`}>
                             {contract.status === 'active' ? 'ใช้งาน' :
                               contract.status === 'warning' ? 'ใกล้หมด' : 'หมดอายุ'}
                           </span>
-                          <span className="text-sm text-gray-500">{contract.number}</span>
+                          <span className="text-xs text-gray-400">{contract.number}</span>
                         </div>
-                        <h4 className="font-medium text-gray-900 mt-1">{contract.title}</h4>
-                        <p className="text-sm text-gray-500">{contract.vendor}</p>
+                        <h4 className="font-medium text-gray-900 text-sm truncate">{contract.title}</h4>
+                        <p className="text-xs text-gray-500 truncate">{contract.vendor}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="font-medium text-gray-900">{formatCurrency(contract.value)}</p>
-                        <p className="text-sm text-gray-500">หมดอายุ: {formatDate(contract.endDate)}</p>
-                        <p className={`text-xs ${contract.daysLeft <= 0 ? 'text-red-600' :
-                            contract.daysLeft <= 7 ? 'text-orange-600' :
-                              'text-green-600'
+                      <div className="text-right flex-shrink-0">
+                        <p className="font-semibold text-gray-900 text-sm">{formatCurrency(contract.value)}</p>
+                        <p className={`text-xs ${contract.daysLeft <= 0 ? 'text-red-600 font-medium' :
+                          contract.daysLeft <= 7 ? 'text-orange-600' :
+                            'text-gray-500'
                           }`}>
-                          {contract.daysLeft <= 0 ? 'หมดอายุแล้ว' :
-                            `เหลือ ${contract.daysLeft} วัน`}
+                          {contract.daysLeft <= 0 ? 'หมดอายุแล้ว' : `เหลือ ${contract.daysLeft} วัน`}
                         </p>
                       </div>
                     </div>
                   </div>
                 )) : (
-                  <div className="px-6 py-8 text-center text-gray-500">
-                    <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>ยังไม่มีสัญญาใกล้หมดอายุ</p>
+                  <div className="px-5 py-10 text-center text-gray-400">
+                    <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <FileText className="w-6 h-6 text-gray-300" />
+                    </div>
+                    <p className="text-sm">ไม่มีสัญญาใกล้หมดอายุ</p>
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Sidebar */}
+          {/* Right Column - Activities & Tasks (1/3 width) */}
           <div className="space-y-6">
             {/* Recent Activities */}
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">กิจกรรมล่าสุด</h3>
-              <div className="space-y-4">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-gray-50 rounded-lg">
+                  <Clock className="w-4 h-4 text-gray-600" />
+                </div>
+                <h3 className="font-semibold text-gray-900">กิจกรรมล่าสุด</h3>
+              </div>
+              <div className="space-y-3">
                 {activities.length > 0 ? activities.map((activity) => (
-                  <div key={activity.id} className="flex gap-3">
-                    <div className={`p-2 rounded-lg ${activity.type === 'upload' ? 'bg-blue-100' :
-                        activity.type === 'approve' ? 'bg-green-100' :
-                          activity.type === 'expire' ? 'bg-red-100' :
-                            'bg-purple-100'
+                  <div key={activity.id} className="flex gap-3 py-2">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${activity.type === 'upload' ? 'bg-blue-50' :
+                      activity.type === 'approve' ? 'bg-green-50' :
+                        activity.type === 'expire' ? 'bg-red-50' :
+                          'bg-purple-50'
                       }`}>
                       {activity.type === 'upload' ? <Upload className="w-4 h-4 text-blue-600" /> :
                         activity.type === 'approve' ? <CheckCircle className="w-4 h-4 text-green-600" /> :
                           activity.type === 'expire' ? <AlertTriangle className="w-4 h-4 text-red-600" /> :
                             <Wallet className="w-4 h-4 text-purple-600" />}
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm text-gray-900">{activity.text}</p>
-                      <p className="text-xs text-gray-500">{activity.user} • {activity.time}</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-900 truncate">{activity.text}</p>
+                      <p className="text-xs text-gray-400">{activity.user} • {activity.time}</p>
                     </div>
                   </div>
                 )) : (
-                  <div className="text-center text-gray-500 py-8">
-                    <Clock className="w-10 h-10 mx-auto mb-2 text-gray-300" />
-                    <p className="text-sm">ยังไม่มีกิจกรรมล่าสุด</p>
+                  <div className="text-center text-gray-400 py-6">
+                    <p className="text-sm">ยังไม่มีกิจกรรม</p>
                   </div>
                 )}
               </div>
             </div>
 
             {/* Upcoming Tasks */}
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">งานที่ต้องทำ</h3>
-              <div className="text-center text-gray-500 py-8">
-                <CheckCircle className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-green-50 rounded-lg">
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                </div>
+                <h3 className="font-semibold text-gray-900">งานที่ต้องทำ</h3>
+              </div>
+              <div className="text-center text-gray-400 py-6">
                 <p className="text-sm">ไม่มีงานที่ต้องทำ</p>
+                <p className="text-xs text-gray-400 mt-1">ทุกอย่างเรียบร้อยดี!</p>
               </div>
             </div>
           </div>
@@ -533,40 +642,4 @@ export default function Dashboard() {
   )
 }
 
-function StatCard({ icon, title, value, color, suffix }: {
-  icon: React.ReactNode
-  title: string
-  value: string | number
-  color: 'blue' | 'green' | 'orange' | 'purple' | 'yellow' | 'red'
-  suffix?: string
-}) {
-  const colors = {
-    blue: 'bg-blue-50 border-blue-200',
-    green: 'bg-green-50 border-green-200',
-    orange: 'bg-orange-50 border-orange-200',
-    purple: 'bg-purple-50 border-purple-200',
-    yellow: 'bg-yellow-50 border-yellow-200',
-    red: 'bg-red-50 border-red-200'
-  }
 
-  return (
-    <Link
-      to={title === 'สัญญาทั้งหมด' ? '/contracts' :
-        title === 'สัญญาที่ใช้งาน' ? '/contracts?status=active' :
-          title === 'ใกล้หมดอายุ' ? '/contracts?filter=expiring' :
-            title === 'รออนุมัติ' ? '/contracts?status=pending' : '/contracts'}
-      className={`${colors[color]} border rounded-xl p-4 block hover:shadow-md transition-shadow cursor-pointer`}
-    >
-      <div className="flex items-center gap-3">
-        <div className="p-2 bg-white rounded-lg shadow-sm">
-          {icon}
-        </div>
-        <div>
-          <p className="text-xs text-gray-600">{title}</p>
-          <p className="text-lg font-bold text-gray-900">{value}</p>
-          {suffix && <p className="text-xs text-gray-500">{suffix}</p>}
-        </div>
-      </div>
-    </Link>
-  )
-}

@@ -53,13 +53,31 @@ async def list_knowledge_bases(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    """List all knowledge bases owned by the current user."""
-    from app.models.ai_models import KnowledgeBase
+    """List all knowledge bases owned by the current user, with in_use flag."""
+    from app.models.ai_models import KnowledgeBase, AIAgent
+
     kbs = (db.query(KnowledgeBase)
            .filter((KnowledgeBase.user_id == user_id) | (KnowledgeBase.is_system == True))
            .order_by(KnowledgeBase.created_at.desc())
            .all())
-    return {"success": True, "data": [kb.to_dict() for kb in kbs]}
+
+    # Collect which KB ids are referenced by at least one agent
+    try:
+        agents = db.query(AIAgent).filter(AIAgent.user_id == user_id).all()
+        used_kb_ids: set = set()
+        for ag in agents:
+            for kid in (ag.knowledge_base_ids or []):
+                used_kb_ids.add(kid)
+    except Exception:
+        used_kb_ids = set()
+
+    result = []
+    for kb in kbs:
+        d = kb.to_dict()
+        d["in_use"] = kb.id in used_kb_ids
+        result.append(d)
+
+    return {"success": True, "data": result}
 
 
 @router.post("")
@@ -117,25 +135,60 @@ async def delete_knowledge_base(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    from app.models.ai_models import KBDocument
+    from app.models.ai_models import KBDocument, AIAgent
     kb = _get_kb_or_404(db, kb_id, user_id)
     if kb.is_system:
         raise HTTPException(status_code=403, detail="System KBs cannot be deleted")
 
-    # Remove vector chunks
+    # Guard: refuse if any agent still references this KB
     try:
-        db.execute(text("DELETE FROM vector_chunks WHERE kb_id = :kid"), {"kid": kb_id})
+        agents_using = db.query(AIAgent).filter(
+            AIAgent.user_id == user_id,
+            AIAgent.knowledge_base_ids.contains([kb_id]),
+        ).all()
+        if agents_using:
+            names = ", ".join(a.name for a in agents_using)
+            raise HTTPException(
+                status_code=409,
+                detail=f"KB นี้ถูกใช้งานโดย Agent: {names} — กรุณาลบการอ้างอิงก่อน"
+            )
+    except HTTPException:
+        raise
     except Exception:
+        pass  # If check fails, allow delete to proceed
+
+    # 1. Remove KBDocument records
+    try:
+        db.query(KBDocument).filter(KBDocument.kb_id == kb_id).delete()
+        db.commit()
+    except Exception as e:
+        logger.warning(f"KB documents cleanup failed: {e}")
         db.rollback()
 
-    # Remove KB Neo4j entities
+    # 2. Remove vector chunks
+    try:
+        db.execute(text("DELETE FROM vector_chunks WHERE kb_id = :kid"), {"kid": kb_id})
+        db.commit()
+    except Exception as e:
+        logger.warning(f"KB vector_chunks cleanup failed: {e}")
+        db.rollback()
+
+    # 3. Remove KB Neo4j entities (Knowledge_base label)
     try:
         from app.services.graph import get_kb_graph_service
         gs = get_kb_graph_service()
         if gs and gs.driver:
             with gs.driver.session() as s:
-                s.run("MATCH (e:Entity:Kb {properties: $p}) DETACH DELETE e",
-                      {"p": f'"kb_id": "{kb_id}"'})
+                result = s.run(
+                    """
+                    MATCH (e:Entity:Knowledge_base)
+                    WHERE e.properties CONTAINS $kid
+                    DETACH DELETE e
+                    RETURN count(e) AS deleted
+                    """,
+                    {"kid": kb_id},
+                )
+                result.consume()
     except Exception as e:
         logger.warning(f"KB Neo4j cleanup failed: {e}")
 
@@ -276,16 +329,16 @@ async def reprocess_kb_document(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    """Reset a stuck/errored document back to pending and re-queue processing."""
-    _get_kb_or_404(db, kb_id, user_id)
-    from app.models.ai_models import KBDocument
+    """Reset a stuck/errored document back to pending and re-queue processing.
+    Works for both system KB (contract attachments) and user KBs."""
+    from app.models.ai_models import KnowledgeBase, KBDocument
+    kb = _get_kb_or_404(db, kb_id, user_id)
+
     doc = db.query(KBDocument).filter(
         KBDocument.id == doc_id, KBDocument.kb_id == kb_id
     ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    if doc.status == "indexed":
-        raise HTTPException(status_code=400, detail="Document is already indexed")
 
     # Clean up previous vector chunks so we start fresh
     try:
@@ -301,9 +354,18 @@ async def reprocess_kb_document(
     doc.entity_count = 0
     db.commit()
 
-    from app.tasks.kb_document import process_kb_document
-    process_kb_document.delay(doc_id)
-    logger.info(f"Re-queued KB document {doc_id} for processing")
+    if kb.is_system:
+        # System KB: re-run contract RAG + GraphRAG pipeline
+        from app.tasks.document import process_contract_rag_indexing, process_graphrag_extraction
+        process_contract_rag_indexing.delay(doc_id, None)
+        process_graphrag_extraction.delay(doc_id, None)
+        logger.info(f"Re-queued system KB document {doc_id} (RAG + GraphRAG)")
+    else:
+        # User KB: run the standard KB processing pipeline
+        from app.tasks.kb_document import process_kb_document
+        process_kb_document.delay(doc_id)
+        logger.info(f"Re-queued KB document {doc_id} for processing")
+
     return {"success": True, "message": "Re-queued for processing"}
 
 
