@@ -316,11 +316,15 @@ def process_kb_document(self, doc_id: str) -> Dict[str, Any]:
                 else:
                     logger.warning("[KB Task] KBGraphService not available — skipping GraphRAG")
 
-        # ── 5. Update KB counters ──────────────────────────────────────────
+        # ── 5. Update KB counters (recalculate from DB — avoids drift on reprocess) ──
         try:
             kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == doc.kb_id).first()
             if kb:
-                kb.total_chunks = (kb.total_chunks or 0) + chunk_count
+                # Recalculate total_chunks from vector_chunks table directly
+                kb.total_chunks = db.execute(
+                    text("SELECT COUNT(*) FROM vector_chunks WHERE kb_id=:kid"),
+                    {"kid": doc.kb_id}
+                ).scalar() or 0
                 kb.document_count = db.execute(
                     text("SELECT COUNT(*) FROM kb_documents WHERE kb_id=:kid"),
                     {"kid": doc.kb_id}

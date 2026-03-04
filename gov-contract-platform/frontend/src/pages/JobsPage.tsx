@@ -4,7 +4,7 @@ import {
     Brain, CheckCircle, XCircle, Loader2, Clock, RefreshCw,
     FileText, Sparkles, Upload, Search, Home,
     ScanText, AlertCircle, Trash2, History, ChevronDown,
-    Calendar, MoreVertical, Save, X,
+    Calendar, MoreVertical, Save, X, Eye, FileText as FileTextIcon
 } from 'lucide-react'
 import NavigationHeader from '../components/NavigationHeader'
 import axios from 'axios'
@@ -14,7 +14,7 @@ import axios from 'axios'
 interface DocumentJob {
     id: string
     filename: string
-    status: 'pending' | 'processing' | 'completed' | 'failed'
+    status: 'pending' | 'processing' | 'completed' | 'failed' | 'saved' | 'deleted'
     contract_id: string | null
     contract_title: string | null
     document_type: string
@@ -29,6 +29,18 @@ interface DocumentJob {
     extracted_data?: Record<string, unknown>
     created_at: string | null
     completed_at: string | null
+}
+
+interface OcrPageStatus {
+    id: string
+    page_number: number
+    status: 'pending' | 'processing' | 'completed' | 'failed'
+    ocr_engine: string | null
+    word_count: number | null
+    attempts: number
+    error: string | null
+    has_selectable_text: boolean
+    updated_at: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -60,14 +72,14 @@ function fmtDate(iso: string | null) {
 }
 
 function StatusIcon({ status }: { status: DocumentJob['status'] }) {
-    if (status === 'completed') return <CheckCircle className="w-4 h-4 text-green-500" />
-    if (status === 'failed') return <XCircle className="w-4 h-4 text-red-500" />
+    if (status === 'completed' || status === 'saved') return <CheckCircle className="w-4 h-4 text-green-500" />
+    if (status === 'failed' || status === 'deleted') return <XCircle className="w-4 h-4 text-red-500" />
     if (status === 'processing') return <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
     return <Clock className="w-4 h-4 text-yellow-500" />
 }
 
 function statusLabel(s: DocumentJob['status']) {
-    return { pending: 'รอดำเนินการ', processing: 'กำลังประมวลผล', completed: 'สำเร็จ', failed: 'ล้มเหลว' }[s] || s
+    return { pending: 'รอดำเนินการ', processing: 'กำลังประมวลผล', completed: 'สำเร็จ', failed: 'ล้มเหลว', saved: 'บันทึกแล้ว', deleted: 'ลบแล้ว' }[s] || s
 }
 
 // ─── Pipeline Step Logic ──────────────────────────────────────────────────────
@@ -87,8 +99,8 @@ function inferPipeline(job: DocumentJob): PipelineStep[] {
     const hasLlmData = !!extracted_data && Object.keys(extracted_data as object).length > 0
     const isProcessing = status === 'processing'
     const isPending = status === 'pending'
-    const isFailed = status === 'failed'
-    const isCompleted = status === 'completed'
+    const isFailed = status === 'failed' || status === 'deleted'
+    const isCompleted = status === 'completed' || status === 'saved'
 
     // Step 1: Upload — always done when job exists
     const s1: PipelineStep = { label: 'อัพโหลด', sublabel: 'บันทึกลง MinIO', state: 'done' }
@@ -156,7 +168,50 @@ const LINE_CLS: Record<StepState, string> = {
     done: 'bg-green-300', active: 'bg-blue-200', error: 'bg-red-200', waiting: 'bg-gray-200',
 }
 
-function JobPipeline({ job }: { job: DocumentJob }) {
+function RawTextPreview({ text }: { text: string }) {
+    // split by form feed \f which is \x0c
+    const rawPages = text.split('\x0c').map(p => p.trim()).filter(Boolean)
+    const [page, setPage] = useState(1)
+
+    // Fallback if no \f or only 1 page
+    if (rawPages.length <= 1) {
+        return (
+            <pre className="mt-3 bg-gray-900 border border-gray-700 shadow-inner text-green-300 text-[10px] leading-relaxed rounded-lg p-4 overflow-x-auto w-full max-h-80 whitespace-pre-wrap font-mono">
+                {text.substring(0, 1500)}{text.length > 1500 ? '\n\n… (truncated)' : ''}
+            </pre>
+        )
+    }
+
+    const cur = Math.min(Math.max(0, page - 1), rawPages.length - 1)
+    return (
+        <div className="mt-3 bg-gray-900 border border-gray-700 shadow-inner rounded-lg overflow-hidden flex flex-col">
+            <div className="bg-gray-800 px-3 py-2 flex items-center justify-between border-b border-gray-700">
+                <span className="text-[10px] font-mono text-gray-300">หน้า {cur + 1} จาก {rawPages.length}</span>
+                <div className="flex items-center gap-2">
+                    <button
+                        disabled={cur === 0}
+                        onClick={(e) => { e.preventDefault(); setPage(p => p - 1) }}
+                        className="px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 text-[10px] disabled:opacity-30 disabled:hover:bg-gray-700 transition"
+                    >
+                        ก่อนหน้า
+                    </button>
+                    <button
+                        disabled={cur === rawPages.length - 1}
+                        onClick={(e) => { e.preventDefault(); setPage(p => p + 1) }}
+                        className="px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 text-[10px] disabled:opacity-30 disabled:hover:bg-gray-700 transition"
+                    >
+                        ถัดไป
+                    </button>
+                </div>
+            </div>
+            <pre className="text-green-300 text-[10px] leading-relaxed p-4 overflow-x-auto w-full max-h-80 whitespace-pre-wrap font-mono">
+                {rawPages[cur].length > 0 ? rawPages[cur] : '(หน้าว่างเปล่า)'}
+            </pre>
+        </div>
+    )
+}
+
+function JobPipeline({ job, onOpenPages }: { job: DocumentJob, onOpenPages: (job: DocumentJob) => void }) {
     const steps = inferPipeline(job)
     const ext = (job.extracted_data || {}) as Record<string, string | number | null>
     const hasExt = Object.keys(ext).length > 0
@@ -259,17 +314,29 @@ function JobPipeline({ job }: { job: DocumentJob }) {
             )}
 
             {/* ── OCR Text Preview ── */}
-            {hasOcr && (
-                <details className="mx-5 mb-4 group">
-                    <summary className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none hover:text-gray-700 transition list-none">
-                        <FileText className="w-3.5 h-3.5 text-gray-400" />
-                        <span>OCR Text ({job.extracted_text!.length.toLocaleString()} ตัวอักษร)</span>
-                        <ChevronDown className="w-3 h-3 text-gray-400 ml-auto group-open:rotate-180 transition-transform" />
-                    </summary>
-                    <pre className="mt-2 bg-gray-900 text-green-300 text-[10px] leading-relaxed rounded-lg p-3 overflow-x-auto max-h-40 whitespace-pre-wrap font-mono">
-                        {job.extracted_text!.substring(0, 800)}{job.extracted_text!.length > 800 ? '\n\n… (truncated)' : ''}
-                    </pre>
-                </details>
+            {job.status !== 'pending' && (
+                <div className="mx-5 mb-4">
+                    <div className="flex justify-between items-start w-full">
+                        {hasOcr ? (
+                            <details className="flex-1 mr-4 group">
+                                <summary className="inline-flex items-center gap-2 text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg cursor-pointer select-none hover:bg-blue-100 transition list-none">
+                                    <FileText className="w-3.5 h-3.5" />
+                                    <span>ดู Raw OCR Text ({job.extracted_text!.length.toLocaleString()} ตัวอักษร)</span>
+                                    <ChevronDown className="w-3 h-3 ml-1 group-open:rotate-180 transition-transform" />
+                                </summary>
+                                <RawTextPreview text={job.extracted_text!} />
+                            </details>
+                        ) : <div className="flex-1" />}
+
+                        <button
+                            onClick={() => onOpenPages(job)}
+                            className="flex items-center gap-1.5 text-xs text-indigo-600 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition shadow-sm whitespace-nowrap flex-shrink-0"
+                        >
+                            <Eye className="w-3.5 h-3.5" />
+                            ตรวจสอบสถานะรายหน้า
+                        </button>
+                    </div>
+                </div>
             )}
         </div>
     )
@@ -320,6 +387,177 @@ function DeleteConfirmModal({ job, onConfirm, onCancel }: {
     )
 }
 
+// ─── Document OCR Pages Modal ────────────────────────────────────────────────
+function OcrPagesModal({ job, onClose }: { job: DocumentJob, onClose: () => void }) {
+    const [pages, setPages] = useState<OcrPageStatus[]>([])
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState<string | null>(null)
+    const [retrying, setRetrying] = useState(false)
+
+    const fetchPages = async () => {
+        try {
+            setLoading(true)
+            const res = await api.get(`/documents/jobs/${job.id}/pages`)
+            setPages(res.data.data || [])
+        } catch (e: any) {
+            setError(e.response?.data?.detail || e.message)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    useEffect(() => {
+        fetchPages()
+        // Poll every 3 seconds if not completed
+        const isFinished = job.status === 'completed' || job.status === 'failed'
+        let interval: any
+        if (!isFinished) {
+            interval = setInterval(fetchPages, 3000)
+        }
+        return () => { if (interval) clearInterval(interval) }
+    }, [job.id, job.status])
+
+    const handleRetryFailed = async () => {
+        try {
+            setRetrying(true)
+            await api.post(`/documents/jobs/${job.id}/retry-pages`)
+            await fetchPages()
+        } catch (e: any) {
+            alert('Failed to retry: ' + (e.response?.data?.detail || e.message))
+        } finally {
+            setRetrying(false)
+        }
+    }
+
+    const hasFailed = pages.some(p => p.status === 'failed')
+
+    return (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+                {/* Header */}
+                <div className="px-6 py-4 border-b flex items-center justify-between bg-gray-50/80">
+                    <div>
+                        <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <FileTextIcon className="w-5 h-5 text-indigo-500" />
+                            สถานะการอ่านข้อความ (OCR) รายหน้า
+                        </h2>
+                        <p className="text-xs text-gray-500 mt-1">
+                            ไฟล์: <span className="font-mono text-indigo-600">{job.filename}</span>
+                        </p>
+                    </div>
+                    <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-full transition">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* Content */}
+                <div className="p-6 flex-1 overflow-y-auto bg-slate-50/50">
+                    {loading && pages.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                            <Loader2 className="w-8 h-8 animate-spin text-indigo-400 mb-4" />
+                            <span className="text-sm">กำลังโหลดข้อมูลหน้า...</span>
+                        </div>
+                    ) : error ? (
+                        <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm border border-red-100 flex items-center gap-3">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                            {error}
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {/* Summary header */}
+                            <div className="flex items-center justify-between">
+                                <div className="flex gap-4">
+                                    <div className="bg-white px-4 py-2 rounded-lg border shadow-sm flex flex-col">
+                                        <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">ทั้งหมด</span>
+                                        <span className="text-lg font-mono font-bold text-gray-800">{pages.length}</span>
+                                    </div>
+                                    <div className="bg-green-50 px-4 py-2 rounded-lg border border-green-100 shadow-sm flex flex-col">
+                                        <span className="text-[10px] text-green-600 font-bold uppercase tracking-wider mb-1">สำเร็จ</span>
+                                        <span className="text-lg font-mono font-bold text-green-700">{pages.filter(p => p.status === 'completed').length}</span>
+                                    </div>
+                                    <div className="bg-blue-50 px-4 py-2 rounded-lg border border-blue-100 shadow-sm flex flex-col">
+                                        <span className="text-[10px] text-blue-600 font-bold uppercase tracking-wider mb-1">กำลังทำ</span>
+                                        <span className="text-lg font-mono font-bold text-blue-700">{pages.filter(p => p.status === 'processing').length}</span>
+                                    </div>
+                                    <div className="bg-red-50 px-4 py-2 rounded-lg border border-red-100 shadow-sm flex flex-col">
+                                        <span className="text-[10px] text-red-600 font-bold uppercase tracking-wider mb-1">ล้มเหลว</span>
+                                        <span className="text-lg font-mono font-bold text-red-700">{pages.filter(p => p.status === 'failed').length}</span>
+                                    </div>
+                                </div>
+
+                                {hasFailed && (
+                                    <button
+                                        onClick={handleRetryFailed}
+                                        disabled={retrying}
+                                        className="inline-flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 text-amber-700 text-sm font-semibold rounded-xl hover:bg-amber-100 transition shadow-sm disabled:opacity-50"
+                                    >
+                                        <RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />
+                                        {retrying ? 'กำลังเริ่มใหม่...' : 'ลองใหม่เฉพาะหน้าที่ล้มเหลว'}
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Grid */}
+                            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mt-4">
+                                {pages.map(p => {
+                                    const isDone = p.status === 'completed'
+                                    const isFail = p.status === 'failed'
+                                    const isProc = p.status === 'processing'
+
+                                    const cardClass = isDone ? 'bg-white border-green-200 hover:border-green-300' :
+                                        isFail ? 'bg-red-50 border-red-200 hover:border-red-300' :
+                                            isProc ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' :
+                                                'bg-gray-50 border-gray-200'
+
+                                    return (
+                                        <div key={p.page_number} className={`border rounded-xl p-3 shadow-sm transition-all flex flex-col ${cardClass}`}>
+                                            <div className="flex items-center justify-between border-b pb-2 mb-2 border-black/5">
+                                                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">
+                                                    Page {p.page_number}
+                                                </span>
+                                                <div className="flex items-center gap-1.5">
+                                                    {isDone && <CheckCircle className="w-4 h-4 text-green-500" />}
+                                                    {isFail && <XCircle className="w-4 h-4 text-red-500" />}
+                                                    {isProc && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
+                                                    {p.status === 'pending' && <Clock className="w-3.5 h-3.5 text-gray-400" />}
+                                                </div>
+                                            </div>
+
+                                            <div className="flex-1 space-y-1.5">
+                                                <div className="flex justify-between items-center text-xs">
+                                                    <span className="text-gray-500">Engine:</span>
+                                                    <span className="font-medium text-gray-700">{p.ocr_engine || '—'}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center text-xs">
+                                                    <span className="text-gray-500">Words:</span>
+                                                    <span className="font-mono text-gray-700">{p.word_count != null ? p.word_count.toLocaleString() : '—'}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center text-xs">
+                                                    <span className="text-gray-500">Status:</span>
+                                                    <span className={`font-semibold ${isDone ? 'text-green-600' : isFail ? 'text-red-600' : isProc ? 'text-blue-600' : 'text-gray-500'}`}>
+                                                        {p.status}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {isFail && p.error && (
+                                                <div className="mt-2 text-[10px] text-red-600 bg-red-100/50 p-1.5 rounded break-words line-clamp-2" title={p.error}>
+                                                    {p.error}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
+
+
 // ─── Job Row Actions Menu ────────────────────────────────────────────────────
 
 function JobActions({ job, onReview, onRerun, onDelete }: {
@@ -350,6 +588,15 @@ function JobActions({ job, onReview, onRerun, onDelete }: {
                     >
                         <Sparkles className="w-3 h-3" />
                         ตรวจสอบ
+                    </button>
+                )}
+                {job.status === 'saved' && (
+                    <button
+                        onClick={onReview}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition shadow-sm"
+                    >
+                        <Eye className="w-3 h-3" />
+                        ดูข้อมูลที่บันทึก
                     </button>
                 )}
                 {job.status === 'failed' && (
@@ -423,6 +670,7 @@ function ReviewModal({ job, onClose, onSaved }: {
     onClose: () => void
     onSaved: () => void
 }) {
+    const isReadOnly = job.status === 'saved' || job.status === 'deleted'
     const ext = (job.extracted_data || {}) as Record<string, string | number | null>
 
     const buildForm = (d: Record<string, string | number | null>): ReviewFormData => ({
@@ -547,7 +795,7 @@ function ReviewModal({ job, onClose, onSaved }: {
         }
     }
 
-    const inputCls = 'w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none'
+    const inputCls = 'w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500'
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto">
@@ -575,16 +823,18 @@ function ReviewModal({ job, onClose, onSaved }: {
                                 {loadingRaw ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
                                 {showRaw ? 'ซ่อน OCR Text' : 'ดู Raw OCR Text'}
                             </button>
-                            <button
-                                onClick={handleReExtract}
-                                disabled={refilling || (!job.extracted_text && !job.has_ocr_text)}
-                                title={(!job.extracted_text && !job.has_ocr_text) ? 'ไม่มี OCR text' : 'ให้ AI วิเคราะห์ใหม่'}
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition disabled:opacity-50 ${refillOk ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
-                                    }`}
-                            >
-                                {refilling ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
-                                {refillOk ? '✓ Fill ใหม่แล้ว' : 'AI Fill ใหม่'}
-                            </button>
+                            {!isReadOnly && (
+                                <button
+                                    onClick={handleReExtract}
+                                    disabled={refilling || (!job.extracted_text && !job.has_ocr_text)}
+                                    title={(!job.extracted_text && !job.has_ocr_text) ? 'ไม่มี OCR text' : 'ให้ AI วิเคราะห์ใหม่'}
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition disabled:opacity-50 ${refillOk ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                                        }`}
+                                >
+                                    {refilling ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
+                                    {refillOk ? '✓ Fill ใหม่แล้ว' : 'AI Fill ใหม่'}
+                                </button>
+                            )}
                         </div>
                     </div>
                     <button onClick={onClose} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg">
@@ -659,42 +909,42 @@ function ReviewModal({ job, onClose, onSaved }: {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">เลขที่สัญญา</label>
-                            <input value={form.contract_number} onChange={set('contract_number')} className={inputCls} placeholder="เช่น สัญญา 001/2568" />
+                            <input value={form.contract_number} onChange={set('contract_number')} disabled={isReadOnly} className={inputCls} placeholder="เช่น สัญญา 001/2568" />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">ชื่อสัญญา / โครงการ</label>
-                            <input value={form.title} onChange={set('title')} className={inputCls} />
+                            <input value={form.title} onChange={set('title')} disabled={isReadOnly} className={inputCls} />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">ผู้รับจ้าง / คู่สัญญา</label>
-                            <input value={form.counterparty} onChange={set('counterparty')} className={inputCls} />
+                            <input value={form.counterparty} onChange={set('counterparty')} disabled={isReadOnly} className={inputCls} />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">ประเภทสัญญา</label>
-                            <select value={form.contract_type} onChange={set('contract_type')} className={inputCls}>
+                            <select value={form.contract_type} onChange={set('contract_type')} disabled={isReadOnly} className={inputCls}>
                                 <option value="">— เลือก —</option>
                                 {CONTRACT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">มูลค่าสัญญา (บาท)</label>
-                            <input type="number" value={form.contract_value} onChange={set('contract_value')} className={inputCls} />
+                            <input type="number" value={form.contract_value} onChange={set('contract_value')} disabled={isReadOnly} className={inputCls} />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">ชื่อโครงการ</label>
-                            <input value={form.project_name} onChange={set('project_name')} className={inputCls} />
+                            <input value={form.project_name} onChange={set('project_name')} disabled={isReadOnly} className={inputCls} />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">วันที่เริ่มต้น</label>
-                            <input type="date" value={form.start_date} onChange={set('start_date')} className={inputCls} />
+                            <input type="date" value={form.start_date} onChange={set('start_date')} disabled={isReadOnly} className={inputCls} />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">วันที่สิ้นสุด</label>
-                            <input type="date" value={form.end_date} onChange={set('end_date')} className={inputCls} />
+                            <input type="date" value={form.end_date} onChange={set('end_date')} disabled={isReadOnly} className={inputCls} />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">สถานะ</label>
-                            <select value={form.status} onChange={set('status')} className={inputCls}>
+                            <select value={form.status} onChange={set('status')} disabled={isReadOnly} className={inputCls}>
                                 <option value="active">ใช้งาน</option>
                                 <option value="draft">ร่าง</option>
                                 <option value="pending_approval">รออนุมัติ</option>
@@ -702,16 +952,16 @@ function ReviewModal({ job, onClose, onSaved }: {
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">ปีงบประมาณ</label>
-                            <input value={form.budget_year} onChange={set('budget_year')} className={inputCls} placeholder="เช่น 2568" />
+                            <input value={form.budget_year} onChange={set('budget_year')} disabled={isReadOnly} className={inputCls} placeholder="เช่น 2568" />
                         </div>
                         <div className="sm:col-span-2">
                             <label className="block text-xs font-medium text-gray-500 mb-1">หน่วยงาน</label>
-                            <input value={form.department_name} onChange={set('department_name')} className={inputCls} />
+                            <input value={form.department_name} onChange={set('department_name')} disabled={isReadOnly} className={inputCls} />
                         </div>
                         <div className="sm:col-span-2">
                             <label className="block text-xs font-medium text-gray-500 mb-1">สรุปเนื้อหา</label>
-                            <textarea value={form.description} onChange={set('description')} rows={3}
-                                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none" />
+                            <textarea value={form.description} onChange={set('description')} rows={3} disabled={isReadOnly}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none disabled:bg-gray-50 disabled:text-gray-500" />
                         </div>
                     </div>
 
@@ -726,17 +976,19 @@ function ReviewModal({ job, onClose, onSaved }: {
                 {/* Footer */}
                 <div className="flex items-center justify-between p-5 border-t bg-gray-50 rounded-b-2xl">
                     <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-white transition">
-                        ยกเลิก
+                        ปิด
                     </button>
-                    <button
-                        onClick={handleSave}
-                        disabled={saving}
-                        className="flex items-center gap-2 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition shadow-sm"
-                    >
-                        {saving
-                            ? <><Loader2 className="w-4 h-4 animate-spin" /> กำลังบันทึก...</>
-                            : <><Save className="w-4 h-4" /> บันทึก</>}
-                    </button>
+                    {!isReadOnly && (
+                        <button
+                            onClick={handleSave}
+                            disabled={saving}
+                            className="flex items-center gap-2 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition shadow-sm"
+                        >
+                            {saving
+                                ? <><Loader2 className="w-4 h-4 animate-spin" /> กำลังบันทึก...</>
+                                : <><Save className="w-4 h-4" /> บันทึก</>}
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
@@ -752,9 +1004,12 @@ export default function JobsPage() {
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState<string>('all')
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-    const [deleteTarget, setDeleteTarget] = useState<DocumentJob | null>(null)
+
+    // View state
     const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set())
     const [reviewJob, setReviewJob] = useState<DocumentJob | null>(null)
+    const [deleteTarget, setDeleteTarget] = useState<DocumentJob | null>(null)
+    const [viewPagesJob, setViewPagesJob] = useState<DocumentJob | null>(null) // New state for OcrPagesModal
 
     const toggleExpand = (id: string) =>
         setExpandedJobs(prev => {
@@ -776,6 +1031,7 @@ export default function JobsPage() {
         try {
             const params: Record<string, string> = { limit: '200' }
             if (statusFilter !== 'all') params.status = statusFilter
+            params.is_history = historyMode ? 'true' : 'false'
             if (historyMode && dateFrom) params.date_from = dateFrom + 'T00:00:00'
             if (historyMode && dateTo) params.date_to = dateTo + 'T23:59:59'
 
@@ -841,7 +1097,7 @@ export default function JobsPage() {
             <NavigationHeader
                 title="งานประมวลผล"
                 subtitle="OCR & AI Extraction Jobs"
-                breadcrumbs={[{ label: 'หน้าหลัก', path: '/' }, { label: 'งานประมวลผล' }]}
+                breadcrumbs={[{ label: 'งานประมวลผล' }]}
             />
 
             <main className="max-w-6xl mx-auto px-4 py-6 space-y-5">
@@ -1028,12 +1284,13 @@ export default function JobsPage() {
                             <div className="divide-y divide-gray-100">
                                 {filtered.map(job => {
                                     const isExpanded = expandedJobs.has(job.id)
-                                    const statusBg = job.status === 'completed' ? 'bg-green-100' :
+                                    const statusBg = job.status === 'completed' || job.status === 'saved' ? 'bg-green-100' :
                                         job.status === 'processing' ? 'bg-blue-100' :
-                                            job.status === 'pending' ? 'bg-yellow-100' : 'bg-red-100'
-                                    const statusPill = job.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                            job.status === 'pending' ? 'bg-yellow-100' : 'bg-gray-100'
+                                    const statusPill = job.status === 'completed' || job.status === 'saved' ? 'bg-green-100 text-green-700' :
                                         job.status === 'processing' ? 'bg-blue-100 text-blue-700' :
-                                            job.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                                            job.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                                                job.status === 'deleted' ? 'bg-gray-100 text-gray-500' : 'bg-red-100 text-red-700'
 
                                     return (
                                         <div key={job.id} className={`transition-colors ${isExpanded ? 'bg-indigo-50/30' : 'hover:bg-gray-50/60'}`}>
@@ -1110,7 +1367,7 @@ export default function JobsPage() {
                                             </div>
 
                                             {/* ── Pipeline (expanded) ── */}
-                                            {isExpanded && <JobPipeline job={job} />}
+                                            {isExpanded && <JobPipeline job={job} onOpenPages={setViewPagesJob} />}
                                         </div>
                                     )
                                 })}
@@ -1160,6 +1417,14 @@ export default function JobsPage() {
                         setReviewJob(null)
                         loadJobs(false)
                     }}
+                />
+            )}
+
+            {/* View OCR Pages modal */}
+            {viewPagesJob && (
+                <OcrPagesModal
+                    job={viewPagesJob}
+                    onClose={() => setViewPagesJob(null)}
                 />
             )}
         </div>

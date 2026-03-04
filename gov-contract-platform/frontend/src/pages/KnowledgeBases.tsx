@@ -605,7 +605,6 @@ export default function KnowledgeBases() {
         title="Knowledge Bases"
         subtitle="จัดการฐานความรู้สำหรับ RAG และ GraphRAG"
         breadcrumbs={[
-          { label: 'หน้าหลัก', path: '/' },
           { label: 'Knowledge Bases' }
         ]}
         actions={

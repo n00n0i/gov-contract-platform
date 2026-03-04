@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Search, Plus, FileText, Calendar, DollarSign, Building2,
@@ -37,16 +38,16 @@ interface Contract {
 }
 
 const statusConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-  draft:            { label: 'ร่าง',              color: 'text-gray-600',   bg: 'bg-gray-100',   icon: FileText },
-  pending_review:   { label: 'รอตรวจสอบ',        color: 'text-yellow-600', bg: 'bg-yellow-100', icon: Clock },
-  pending_approval: { label: 'รออนุมัติ',         color: 'text-orange-600', bg: 'bg-orange-100', icon: Clock },
-  approved:         { label: 'อนุมัติแล้ว',       color: 'text-teal-600',   bg: 'bg-teal-100',   icon: CheckCircle },
-  active:           { label: 'ดำเนินการ',         color: 'text-green-600',  bg: 'bg-green-100',  icon: CheckCircle },
-  on_hold:          { label: 'พักการดำเนินการ',   color: 'text-purple-600', bg: 'bg-purple-100', icon: Clock },
-  completed:        { label: 'เสร็จสิ้น',         color: 'text-blue-600',   bg: 'bg-blue-100',   icon: CheckCircle },
-  terminated:       { label: 'ยกเลิก',            color: 'text-red-600',    bg: 'bg-red-100',    icon: XCircle },
-  cancelled:        { label: 'ยกเลิก',            color: 'text-red-600',    bg: 'bg-red-100',    icon: XCircle },
-  expired:          { label: 'หมดอายุ',           color: 'text-orange-600', bg: 'bg-orange-100', icon: Clock },
+  draft: { label: 'ร่าง', color: 'text-gray-600', bg: 'bg-gray-100', icon: FileText },
+  pending_review: { label: 'รอตรวจสอบ', color: 'text-yellow-600', bg: 'bg-yellow-100', icon: Clock },
+  pending_approval: { label: 'รออนุมัติ', color: 'text-orange-600', bg: 'bg-orange-100', icon: Clock },
+  approved: { label: 'อนุมัติแล้ว', color: 'text-teal-600', bg: 'bg-teal-100', icon: CheckCircle },
+  active: { label: 'ดำเนินการ', color: 'text-green-600', bg: 'bg-green-100', icon: CheckCircle },
+  on_hold: { label: 'พักการดำเนินการ', color: 'text-purple-600', bg: 'bg-purple-100', icon: Clock },
+  completed: { label: 'เสร็จสิ้น', color: 'text-blue-600', bg: 'bg-blue-100', icon: CheckCircle },
+  terminated: { label: 'ยกเลิก', color: 'text-red-600', bg: 'bg-red-100', icon: XCircle },
+  cancelled: { label: 'ยกเลิก', color: 'text-red-600', bg: 'bg-red-100', icon: XCircle },
+  expired: { label: 'หมดอายุ', color: 'text-orange-600', bg: 'bg-orange-100', icon: Clock },
 }
 
 const contractTypeLabels: Record<string, string> = {
@@ -124,6 +125,7 @@ export default function Contracts() {
   // Menu
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
 
   // Toast
   const [toast, setToast] = useState<{ type: string; text: string } | null>(null)
@@ -144,6 +146,7 @@ export default function Contracts() {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpenMenuId(null)
+        setMenuPos(null)
       }
     }
     document.addEventListener('mousedown', handler)
@@ -176,7 +179,7 @@ export default function Contracts() {
         const d = res.data.data
         setStats({ total: d.total_contracts || 0, active: d.active_contracts || 0, expiringSoon: d.expiring_soon || 0, totalValue: d.total_value || 0 })
       }
-    } catch {}
+    } catch { }
   }
 
   const formatCurrency = (v: number) => v ? new Intl.NumberFormat('th-TH').format(v) + ' บาท' : '-'
@@ -376,37 +379,23 @@ export default function Contracts() {
             <button onClick={() => navigate(`/upload?contract_id=${contract.id}`)} className="p-2 hover:bg-gray-100 rounded-lg transition" title="อัปโหลดเอกสาร">
               <Paperclip className="w-4 h-4 text-gray-600" />
             </button>
-            {/* MoreVertical dropdown */}
+            {/* MoreVertical dropdown – rendered as portal to escape table clipping */}
             <div className="relative" ref={openMenuId === contract.id ? menuRef : undefined}>
-              <button onClick={() => setOpenMenuId(openMenuId === contract.id ? null : contract.id)} className="p-2 hover:bg-gray-100 rounded-lg transition">
+              <button
+                onClick={(e) => {
+                  if (openMenuId === contract.id) {
+                    setOpenMenuId(null)
+                    setMenuPos(null)
+                  } else {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                    setMenuPos({ top: rect.bottom + 4, left: rect.right - 192 })
+                    setOpenMenuId(contract.id)
+                  }
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg transition"
+              >
                 <MoreVertical className="w-4 h-4 text-gray-600" />
               </button>
-              {openMenuId === contract.id && (
-                <div className="absolute right-0 top-9 bg-white rounded-xl shadow-xl border z-30 py-1 w-48">
-                  {transitions.length > 0 && (
-                    <>
-                      <p className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">เปลี่ยนสถานะ</p>
-                      {transitions.map(t => (
-                        <button key={t.value} onClick={() => handleStatusChange(contract.id, t.value)}
-                          className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                          {`-> ${t.label}`}
-                        </button>
-                      ))}
-                      <div className="border-t my-1" />
-                    </>
-                  )}
-                  <button onClick={() => { openEdit(contract); setOpenMenuId(null) }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                    <Edit className="w-4 h-4" /> แก้ไขข้อมูล
-                  </button>
-                  <button onClick={() => { navigate(`/upload?contract_id=${contract.id}`); setOpenMenuId(null) }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                    <Paperclip className="w-4 h-4" /> อัปโหลดเอกสาร
-                  </button>
-                  <div className="border-t my-1" />
-                  <button onClick={() => { setDeletingId(contract.id); setOpenMenuId(null) }} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
-                    <Trash2 className="w-4 h-4" /> ลบสัญญา
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         </td>
@@ -750,6 +739,44 @@ export default function Contracts() {
 
       {/* Toast */}
       {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
+
+      {/* Portal dropdown menu – rendered outside table to avoid clipping */}
+      {openMenuId && menuPos && (() => {
+        const contract = contracts.find(c => c.id === openMenuId)
+        if (!contract) return null
+        const transitions = statusTransitions[contract.status] || []
+        return createPortal(
+          <div
+            ref={menuRef}
+            style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, zIndex: 9999 }}
+            className="bg-white rounded-xl shadow-xl border py-1 w-48"
+          >
+            {transitions.length > 0 && (
+              <>
+                <p className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">เปลี่ยนสถานะ</p>
+                {transitions.map(t => (
+                  <button key={t.value} onClick={() => handleStatusChange(contract.id, t.value)}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                    {`-> ${t.label}`}
+                  </button>
+                ))}
+                <div className="border-t my-1" />
+              </>
+            )}
+            <button onClick={() => { openEdit(contract); setOpenMenuId(null); setMenuPos(null) }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              <Edit className="w-4 h-4" /> แก้ไขข้อมูล
+            </button>
+            <button onClick={() => { navigate(`/upload?contract_id=${contract.id}`); setOpenMenuId(null); setMenuPos(null) }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              <Paperclip className="w-4 h-4" /> อัปโหลดเอกสาร
+            </button>
+            <div className="border-t my-1" />
+            <button onClick={() => { setDeletingId(contract.id); setOpenMenuId(null); setMenuPos(null) }} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+              <Trash2 className="w-4 h-4" /> ลบสัญญา
+            </button>
+          </div>,
+          document.body
+        )
+      })()}
     </div>
   )
 }

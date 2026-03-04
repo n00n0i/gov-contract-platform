@@ -1019,8 +1019,225 @@ def process_document_upload_job(self, job_id: str) -> Dict[str, Any]:
         db.close()
 
 
+@shared_task(bind=True, max_retries=0)
+def process_document_upload_job_v2(self, job_id: str) -> Dict[str, Any]:
+    """
+    v2 page-level concurrent OCR task.
+
+    Flow:
+      1. Download file from MinIO
+      2. Split PDF into per-page images (pdfplumber text-layer detection)
+      3. Create DocumentOCRPage records (pending)
+      4. asyncio.Semaphore concurrent OCR:
+         - hybrid: text-layer pages skip vision OCR
+         - SHA-256 hash dedup: identical pages reuse cache
+         - per-page retry up to 3x with backoff
+      5. Aggregate pages with \\f separator
+      6. LLM extraction sliding window (2 pages at a time)
+      7. Finalize job
+    """
+    import asyncio
+    from datetime import datetime as _dt
+    from app.models.document_job import DocumentProcessingJob
+    from app.services.document.page_ocr_service import PageOCRService
+    from app.services.document.ocr_settings_service import get_ocr_settings_service
+    from app.api.v1.documents import _parse_llm_json, DEFAULT_EXTRACTION_PROMPT, SYSTEM_PROMPT
+    import httpx
+
+    logger.info(f"[JobV2] Starting page-level OCR for job {job_id}")
+    db = SessionLocal()
+    try:
+        job = db.query(DocumentProcessingJob).filter(DocumentProcessingJob.id == job_id).first()
+        if not job:
+            return {"status": "error", "reason": "job not found"}
+
+        job.status = "processing"
+        job.celery_task_id = self.request.id
+        db.commit()
+
+        storage = get_storage_service()
+
+        # 1. Download
+        try:
+            file_bytes = storage.download_file(job.storage_path)
+        except Exception as e:
+            raise RuntimeError(f"MinIO download failed: {e}")
+
+        # 2-4. Page-level OCR
+        concurrent = getattr(job, "ocr_concurrent", 2) or 2
+        max_pages  = getattr(job, "ocr_max_pages_per_worker", 5) or 5
+
+        ocr_settings = get_ocr_settings_service(db=db, user_id=job.user_id)
+        page_svc = PageOCRService(ocr_settings_service=ocr_settings)
+
+        page_results = asyncio.run(
+            page_svc.process_job_pages(
+                job_id=job_id,
+                file_bytes=file_bytes,
+                mime_type=job.mime_type or "application/pdf",
+                db=db,
+                concurrent=concurrent,
+                max_per_job=max_pages,
+                retry_failed_only=False,
+            )
+        )
+
+        # 5. Aggregate with \f separator
+        successful_pages = [r for r in page_results if r.success and r.text]
+        failed_pages     = [r for r in page_results if not r.success]
+
+        ocr_text = "\f".join(r.text for r in successful_pages)
+        page_count = len(page_results)
+        ocr_engine_name = successful_pages[0].ocr_engine if successful_pages else "unknown"
+        ocr_error_msg = (
+            f"{len(failed_pages)} page(s) failed: " +
+            ", ".join(f"p{r.page_number}={r.error}" for r in failed_pages[:3])
+        ) if failed_pages else None
+
+        logger.info(f"[JobV2] OCR done: {len(successful_pages)}/{page_count} OK")
+
+        # Cache to MinIO
+        if ocr_text:
+            try:
+                import io as _io
+                base_folder = "/".join(job.storage_path.split("/")[:-1])
+                txt_path = f"{base_folder}/{job_id}_ocr.txt"
+                storage.upload_file(
+                    file_data=_io.BytesIO(ocr_text.encode("utf-8")),
+                    filename=f"{job_id}_ocr.txt",
+                    content_type="text/plain; charset=utf-8",
+                    folder=base_folder,
+                    metadata={"job_id": job_id, "type": "ocr_cache_v2"},
+                )
+                job.ocr_text_path = txt_path
+            except Exception as save_err:
+                logger.warning(f"[JobV2] MinIO cache save failed: {save_err}")
+
+        # 6. LLM sliding window extraction
+        from app.models.identity import User
+        from app.models.ai_provider import AIProvider
+
+        extracted_data: dict = {}
+        llm_error_msg = None
+
+        if ocr_text:
+            try:
+                provider = None
+                if job.llm_provider_id:
+                    provider = db.query(AIProvider).filter(
+                        AIProvider.id == job.llm_provider_id).first()
+                if not provider:
+                    user = db.query(User).filter(User.id == job.user_id).first()
+                    if user and getattr(user, "active_llm_provider_id", None):
+                        provider = db.query(AIProvider).filter(
+                            AIProvider.id == user.active_llm_provider_id).first()
+                if not provider:
+                    provider = db.query(AIProvider).filter(
+                        AIProvider.user_id == job.user_id,
+                        AIProvider.is_active == True,
+                    ).first()
+
+                if provider:
+                    prompt_text = job.extraction_prompt or DEFAULT_EXTRACTION_PROMPT
+                    pages_text = ocr_text.split("\f")
+                    merged: dict = {}
+
+                    base_url = (provider.api_url or "").rstrip("/")
+                    if base_url.endswith("/v1"):
+                        base_url = base_url[:-3]
+                    headers_llm: dict = {"Content-Type": "application/json"}
+                    if provider.api_key:
+                        headers_llm["Authorization"] = f"Bearer {provider.api_key}"
+                    model = (getattr(provider, "model", None)
+                             or getattr(provider, "model_name", None)
+                             or "gpt-3.5-turbo")
+                    ptype = (getattr(provider, "provider_type", "") or "").lower()
+
+                    for i in range(0, max(1, len(pages_text)), 2):
+                        window = "\n\n".join(pages_text[i:i + 2])[:5000]
+                        user_msg = f"{prompt_text}\n{window}"
+                        try:
+                            with httpx.Client(timeout=90) as client:
+                                if "ollama" in ptype or "ollama" in base_url:
+                                    r = client.post(
+                                        f"{base_url}/api/generate",
+                                        json={"model": model,
+                                              "prompt": f"{SYSTEM_PROMPT}\n\n{user_msg}",
+                                              "stream": False},
+                                        headers=headers_llm,
+                                    )
+                                    raw = r.json().get("response", "") if r.status_code == 200 else ""
+                                else:
+                                    r = client.post(
+                                        f"{base_url}/v1/chat/completions",
+                                        json={
+                                            "model": model,
+                                            "messages": [
+                                                {"role": "system", "content": SYSTEM_PROMPT},
+                                                {"role": "user",   "content": user_msg},
+                                            ],
+                                            "temperature": 0.0,
+                                        },
+                                        headers=headers_llm,
+                                    )
+                                    raw = (r.json()["choices"][0]["message"]["content"]
+                                           if r.status_code == 200 else "")
+                            if raw:
+                                window_data = _parse_llm_json(raw)
+                                for k, v in window_data.items():
+                                    if v is not None and merged.get(k) is None:
+                                        merged[k] = v
+                        except Exception as we:
+                            logger.warning(f"[JobV2] LLM window {i} failed: {we}")
+
+                    extracted_data = merged
+                    logger.info(f"[JobV2] LLM extracted {len(extracted_data)} fields")
+                else:
+                    llm_error_msg = "No LLM provider configured"
+            except Exception as e:
+                llm_error_msg = str(e)
+                logger.warning(f"[JobV2] LLM extraction failed: {e}")
+
+        # 7. Finalize
+        all_failed = len(failed_pages) == page_count and page_count > 0
+        job.status = "failed" if all_failed else "completed"
+        job.extracted_text = ocr_text
+        job.extracted_data = extracted_data
+        job.page_count = page_count
+        job.ocr_engine = ocr_engine_name
+        job.ocr_error = ocr_error_msg
+        job.llm_error = llm_error_msg
+        job.completed_at = _dt.utcnow()
+        db.commit()
+
+        logger.info(f"[JobV2] Job {job_id} → {job.status}")
+        return {
+            "status": job.status,
+            "job_id": job_id,
+            "pages_total": page_count,
+            "pages_ok": len(successful_pages),
+            "pages_failed": len(failed_pages),
+        }
+
+    except Exception as exc:
+        logger.error(f"[JobV2] Fatal exception for job {job_id}: {exc}")
+        try:
+            from app.models.document_job import DocumentProcessingJob as _Job
+            j2 = db.query(_Job).filter(_Job.id == job_id).first()
+            if j2:
+                j2.status = "failed"
+                j2.ocr_error = str(exc)
+                db.commit()
+        except Exception:
+            pass
+        return {"status": "failed", "job_id": job_id, "error": str(exc)}
+    finally:
+        db.close()
+
+
 @shared_task
 def cleanup_temp_files():
+
     """
     Clean up temporary uploaded files
     """

@@ -29,7 +29,7 @@ export default function NavigationHeader({
     const paths = location.pathname.split('/').filter(Boolean)
     if (paths.length === 0) return []
     
-    const crumbs: BreadcrumbItem[] = [{ label: 'หน้าหลัก', path: '/' }]
+    const crumbs: BreadcrumbItem[] = []
     
     paths.forEach((path, idx) => {
       const pathMap: Record<string, string> = {

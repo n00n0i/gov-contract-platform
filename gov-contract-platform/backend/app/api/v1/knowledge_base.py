@@ -317,6 +317,27 @@ async def delete_kb_document(
 
     db.delete(doc)
     db.commit()
+
+    # Recalculate KB counters after deletion (source of truth)
+    try:
+        from app.models.ai_models import KnowledgeBase
+        kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+        if kb:
+            kb.document_count = db.execute(
+                text("SELECT COUNT(*) FROM kb_documents WHERE kb_id=:kid"),
+                {"kid": kb_id}
+            ).scalar() or 0
+            kb.total_chunks = db.execute(
+                text("SELECT COUNT(*) FROM vector_chunks WHERE kb_id=:kid"),
+                {"kid": kb_id}
+            ).scalar() or 0
+            if kb.document_count == 0:
+                kb.is_indexed = False
+            db.commit()
+    except Exception as e:
+        logger.warning(f"KB counter recalc after doc delete failed: {e}")
+        db.rollback()
+
     return {"success": True, "message": "Document removed from Knowledge Base"}
 
 
@@ -380,10 +401,26 @@ async def kb_stats(
     kb = _get_kb_or_404(db, kb_id, user_id)
     from app.models.ai_models import KBDocument
 
-    docs = db.query(KBDocument).filter(KBDocument.kb_id == kb_id).all()
-    status_counts = {}
-    for d in docs:
-        status_counts[d.status] = status_counts.get(d.status, 0) + 1
+    # Use kb.document_count as source of truth — same field the KB list card uses.
+    # This ensures stats modal is always consistent with the main page.
+    doc_count = kb.document_count or 0
+
+    # Only query live kb_documents for status breakdown when we know docs exist.
+    # If doc_count == 0 (e.g. after a DB clear), skip to avoid showing phantom records.
+    status_counts: dict = {}
+    if doc_count > 0:
+        docs = db.query(KBDocument).filter(KBDocument.kb_id == kb_id).all()
+        for d in docs:
+            status_counts[d.status] = status_counts.get(d.status, 0) + 1
+
+    # Count vector chunks from vector_chunks table directly
+    try:
+        vector_chunk_count = db.execute(
+            text("SELECT COUNT(*) FROM vector_chunks WHERE kb_id = :kid"),
+            {"kid": kb_id}
+        ).scalar() or 0
+    except Exception:
+        vector_chunk_count = kb.total_chunks or 0
 
     # Count Neo4j entities
     neo4j_count = 0
@@ -404,9 +441,9 @@ async def kb_stats(
         "success": True,
         "data": {
             "kb": kb.to_dict(),
-            "document_count": len(docs),
+            "document_count": doc_count,
             "status_counts": status_counts,
-            "total_chunks": kb.total_chunks or 0,
+            "total_chunks": vector_chunk_count,
             "neo4j_entities": neo4j_count,
         }
     }

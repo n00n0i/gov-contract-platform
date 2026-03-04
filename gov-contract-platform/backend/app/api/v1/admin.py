@@ -321,17 +321,17 @@ async def _delete_rag_chunks(file_id: str, db: Session):
     try:
         from app.models.contract import ContractAttachment
         
-        # 1. Delete from document_chunks table if exists
+        # 1. Delete from vector_chunks table if exists
         try:
             result = db.execute(
-                "DELETE FROM document_chunks WHERE document_id = :file_id",
+                text("DELETE FROM vector_chunks WHERE document_id = :file_id"),
                 {"file_id": file_id}
             )
             deleted = result.rowcount if hasattr(result, 'rowcount') else 0
             logger.info(f"Deleted {deleted} RAG chunks for file {file_id}")
         except Exception as e:
             # Table might not exist
-            logger.warning(f"Could not delete from document_chunks: {e}")
+            logger.warning(f"Could not delete from vector_chunks: {e}")
         
         # 2. Reset extracted text and OCR status in ContractAttachment
         file = db.query(ContractAttachment).filter(
@@ -559,8 +559,8 @@ async def clear_rag_storage(
         )
     
     try:
-        # Delete from document_chunks table
-        result = db.execute("DELETE FROM document_chunks")
+        # Delete from vector_chunks table
+        result = db.execute(text("DELETE FROM vector_chunks"))
         db.commit()
         
         deleted_count = result.rowcount if hasattr(result, 'rowcount') else 0
@@ -621,7 +621,7 @@ async def clear_all_storage(
         
         # 1. Delete RAG chunks first
         try:
-            db.execute("DELETE FROM document_chunks")
+            db.execute(text("DELETE FROM vector_chunks"))
             db.commit()
         except Exception as e:
             logger.warning(f"Could not delete RAG chunks: {e}")
@@ -754,6 +754,23 @@ async def clear_all_contracts(
             logger.warning(f"Could not clear vector_chunks: {e}")
             stats["errors"].append(f"vector_chunks: {e}")
 
+        # Also delete kb_documents records and reset KB cached counters
+        try:
+            from app.models.ai_models import KnowledgeBase, KBDocument
+            system_kb = db.query(KnowledgeBase).filter(
+                KnowledgeBase.is_system == True
+            ).first()
+            if system_kb:
+                db.query(KBDocument).filter(KBDocument.kb_id == system_kb.id).delete()
+                system_kb.document_count = 0
+                system_kb.total_chunks = 0
+                system_kb.is_indexed = False
+                db.commit()
+                logger.info(f"[clear_all_contracts] Cleared kb_documents + reset KB counters for system KB {system_kb.id}")
+        except Exception as e:
+            logger.warning(f"Could not reset KB counters: {e}")
+            db.rollback()
+
         # ── 5. Clear Neo4j GraphRAG Contracts domain ───────────────────────
         try:
             from app.services.graph import get_contracts_graph_service
@@ -834,7 +851,7 @@ async def reset_for_rebuild(
         db.execute(text("DELETE FROM contracts"))
         db.commit()
 
-        # 2. Clear system contracts KB vector chunks
+        # 2. Clear system contracts KB: vector_chunks + kb_documents + reset KB counters
         try:
             result = db.execute(
                 text("DELETE FROM vector_chunks WHERE kb_id = :kb_id"),
@@ -844,6 +861,23 @@ async def reset_for_rebuild(
             db.commit()
         except Exception as e:
             stats["errors"].append(f"vector_chunks: {e}")
+
+        # Also delete kb_documents records and reset KB cached counters
+        try:
+            from app.models.ai_models import KnowledgeBase, KBDocument
+            system_kb = db.query(KnowledgeBase).filter(
+                KnowledgeBase.is_system == True
+            ).first()
+            if system_kb:
+                db.query(KBDocument).filter(KBDocument.kb_id == system_kb.id).delete()
+                system_kb.document_count = 0
+                system_kb.total_chunks = 0
+                system_kb.is_indexed = False
+                db.commit()
+                logger.info(f"[reset_for_rebuild] Cleared kb_documents + reset KB counters for system KB {system_kb.id}")
+        except Exception as e:
+            logger.warning(f"Could not reset KB counters: {e}")
+            db.rollback()
 
         # 3. Clear Neo4j GraphRAG
         try:
@@ -966,7 +1000,7 @@ async def nuke_all(
         except Exception as e:
             stats["errors"].append(f"jobs: {e}")
 
-        # 5. Clear system contracts KB vector chunks
+        # 5. Clear system contracts KB: vector_chunks + kb_documents + reset KB counters
         try:
             result = db.execute(
                 text("DELETE FROM vector_chunks WHERE kb_id = :kb_id"),
@@ -976,6 +1010,23 @@ async def nuke_all(
             db.commit()
         except Exception as e:
             stats["errors"].append(f"vector_chunks: {e}")
+
+        # Also delete kb_documents records and reset KB cached counters
+        try:
+            from app.models.ai_models import KnowledgeBase, KBDocument
+            system_kb = db.query(KnowledgeBase).filter(
+                KnowledgeBase.is_system == True
+            ).first()
+            if system_kb:
+                db.query(KBDocument).filter(KBDocument.kb_id == system_kb.id).delete()
+                system_kb.document_count = 0
+                system_kb.total_chunks = 0
+                system_kb.is_indexed = False
+                db.commit()
+                logger.info(f"[nuke_all] Cleared kb_documents + reset KB counters for system KB {system_kb.id}")
+        except Exception as e:
+            logger.warning(f"Could not reset KB counters: {e}")
+            db.rollback()
 
         # 6. Clear Neo4j GraphRAG
         try:
